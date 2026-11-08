@@ -39,10 +39,10 @@ export default function AdvisorCard() {
           </div>
         )}
         {data && (
-          <ol className="fade-in space-y-5">
+          <ol className="fade-in list-none space-y-5 p-0">
             {data.moves.slice(0, 3).map((m, i) => (
-              <li key={m.move_code} className="grid grid-cols-[1.5rem_1fr] gap-x-2">
-                <span className="num pt-0.5 text-[15px] text-ink-2">{i + 1}.</span>
+              <li key={m.move_code} className="grid list-none grid-cols-[1.5rem_1fr] gap-x-2">
+                <span aria-hidden className="num pt-0.5 text-[15px] text-ink-2">{i + 1}.</span>
                 <div>
                   <h3 className="text-[17px] font-medium leading-snug">{m.title_text}</h3>
                   <p className="mt-1 text-[15px] text-ink-2">{m.why_text}</p>

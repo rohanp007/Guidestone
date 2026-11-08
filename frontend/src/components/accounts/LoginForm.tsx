@@ -25,11 +25,13 @@ export default function LoginForm({ passwordHint }: { passwordHint?: string }) {
     setError(null);
     try {
       await login(email, password);
+      setPassword("");
       router.replace("/accounts");
     } catch (err) {
       setPassword("");
       setError(err instanceof ApiError && typeof err.detail === "string" ? err.detail : "Could not sign in. Try again.");
-      setBusy(false);
+    } finally {
+      setBusy(false);       // Next can keep this page mounted behind /accounts, so a stuck "Signing in…" would still be here after sign-out
     }
   };
 
