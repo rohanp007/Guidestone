@@ -32,7 +32,8 @@ def test_status_has_a_plain_label():
 
 def test_forecast_covers_180_days():
     f = session_for("C002").get("/api/me/forecast").json()
-    assert f["horizon_months"] == 6 and len(f["daily"]["p50"]) == 91 and f["monthly"]
+    assert f["horizon_months"] == 6 and f["monthly"]
+    assert len(f["daily"]["p50"]) == 182 and f["daily"]["p50"][0] == f["start_liquid"]          # daily for the whole horizon (as of through day 181)
 
 
 def test_recurring_excludes_transfers_and_dates_are_in_the_future():

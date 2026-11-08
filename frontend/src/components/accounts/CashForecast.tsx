@@ -11,26 +11,35 @@ const DAY = 86_400_000;
 const HORIZON_DAYS = 180;
 type Pt = { t: number; p10: number; p50: number; p90: number; band: number };
 
-/** Daily points for the first 90 days, then the month-end points to the end of the 6-month horizon (day 181). One time axis, so the spacing is honest. */
+/** One daily point per day over the whole horizon (the API sends a daily band for every day), so the resolution never changes. */
 export function toPoints(f: LiquidForecast): Pt[] {
   const t0 = parseDay(f.as_of_date).getTime();
-  const pt = (t: number, p10: number, p50: number, p90: number): Pt => ({ t, p10, p50, p90, band: p90 - p10 });
-  const pts: Pt[] = (f.daily?.p50 ?? []).map((_, i) => pt(t0 + i * DAY, f.daily!.p10[i], f.daily!.p50[i], f.daily!.p90[i]));
-  const last = pts.length ? pts[pts.length - 1].t : t0;
-  for (const m of f.monthly ?? []) {
-    const t = parseDay(m.day).getTime();
-    if (t > last && t <= t0 + (HORIZON_DAYS + 1) * DAY) pts.push(pt(t, m.p10, m.p50, m.p90));
-  }
-  return pts;
+  const d = f.daily;
+  if (!d) return [];
+  return d.p50.map((_, i) => ({ t: t0 + i * DAY, p10: d.p10[i], p50: d.p50[i], p90: d.p90[i], band: d.p90[i] - d.p10[i] })).filter((p) => p.t <= t0 + (HORIZON_DAYS + 1) * DAY);
 }
+
+/** Runs of consecutive days where the median path is under the cushion, as [first day, last day] (ms). */
+export function belowRuns(pts: Pt[], cushion: number): [number, number][] {
+  const runs: [number, number][] = [];
+  for (const p of pts) {
+    if (p.p50 >= cushion) continue;
+    const last = runs[runs.length - 1];
+    if (last && p.t - last[1] <= DAY) last[1] = p.t; else runs.push([p.t, p.t]);
+  }
+  return runs;
+}
+
+const rangeLabel = ([a, b]: [number, number]) => (a === b ? dateShort(isoOf(a)) : `${dateShort(isoOf(a))} – ${dateShort(isoOf(b))}`);
 
 function summary(f: LiquidForecast, pts: Pt[]): string {
   const end = pts[pts.length - 1];
   const low = f.low_point;
-  const c = f.cushion_risk;
+  const cushion = f.cushion_risk.buffer;
+  const runs = belowRuns(pts, cushion);
   let s = `Median cash goes from ${money0(f.start_liquid)} today to ${money0(end.p50)} on ${dateLong(isoOf(end.t))}. The lowest median balance is ${money0(low.p50)} on ${dateLong(low.day)}. `;
-  s += `The cushion is ${money0(c.buffer)} (one month of essentials). `;
-  s += c.first_date_p50 ? `The median path is below it from ${dateLong(c.first_date_p50)}.` : "The median path stays above it.";
+  s += `The 1-month cushion is ${money0(cushion)}. `;
+  s += runs.length ? `The median path is below it ${runs.map(rangeLabel).join(", ")}.` : "The median path stays above it.";
   return s;
 }
 
@@ -65,7 +74,7 @@ export default function CashForecast({ load }: { load: Load<LiquidForecast> }) {
           <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-1 text-[13px] text-ink-2">
             <span className="inline-flex items-center gap-2"><Swatch kind="line" /> Median</span>
             <span className="inline-flex items-center gap-2"><Swatch kind="band" /> Likely range (10th–90th)</span>
-            <span className="inline-flex items-center gap-2"><Swatch kind="dash" /> Cushion</span>
+            <span className="inline-flex items-center gap-2"><Swatch kind="dash" /> 1-month cushion</span>
             <span className="inline-flex items-center gap-2"><Swatch kind="zero" /> $0</span>
             {events.length > 0 && <span className="inline-flex items-center gap-2"><Swatch kind="dot" /> Event</span>}
           </div>
@@ -92,7 +101,7 @@ export default function CashForecast({ load }: { load: Load<LiquidForecast> }) {
                 <Area dataKey="p10" stackId="band" stroke="none" fill="transparent" isAnimationActive={false} activeDot={false} />
                 <Area dataKey="band" stackId="band" stroke="none" fill={C.navyTint} fillOpacity={1} activeDot={false} isAnimationActive={!reduce} animationDuration={DRAW_MS} animationEasing="ease-out" />
                 <ReferenceLine y={0} stroke={C.ink} strokeWidth={1} />
-                <ReferenceLine y={cushion} stroke={C.ink2} strokeDasharray="4 4" />
+                <ReferenceLine y={cushion} stroke={C.ink2} strokeDasharray="4 4" label={{ value: "1-month cushion", position: "insideBottomRight", fill: C.ink2, fontSize: 12, fontFamily: AXIS.fontFamily }} />
                 <Line dataKey="p50" stroke={C.navy} strokeWidth={2} dot={false} activeDot={{ r: 4, fill: C.navy, stroke: C.surface, strokeWidth: 2 }}
                   isAnimationActive={!reduce} animationDuration={DRAW_MS} animationEasing="ease-out" />
                 {events.map((e) => { const t = parseDay(e.day).getTime(); return <ReferenceDot key={`${e.kind}-${e.day}`} x={t} y={yAt(t)} r={5} fill={C.orange} stroke={C.surface} strokeWidth={2} ifOverflow="visible" />; })}

@@ -460,14 +460,28 @@ def _used_assumptions(profile: Profile, A_all: dict[str, dict], sch: Schedule) -
     return {n: Assumption(**A_all[n]) for n in names}
 
 
-def _summarize(profile: Profile, sim: Sim, horizon_months: int, A_all: dict[str, dict]) -> LiquidForecast:
+def no_narrowing(p50: np.ndarray, p10: np.ndarray, p90: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Bands that never get narrower as the horizon grows. The calibration factors are fit per horizon bucket and interpolated between
+    anchors (day 30, 90, 180); the short-horizon factor is large (the raw band is tiny there), so a calibrated band could be wider at
+    day 30 than at day 90. Uncertainty about the future cannot shrink with distance, so each day's width is at least the widest earlier
+    width (both sides scaled alike, keeping the band's shape). This can only widen a band, so the calibrated coverage stays at or above
+    what the backtest measured."""
+    width = p90 - p10
+    widest = np.maximum.accumulate(width)
+    lower = np.divide(p50 - p10, width, out=np.full_like(width, np.nan), where=width > 1e-9)       # the share of the band below the median
+    idx = np.maximum.accumulate(np.where(np.isnan(lower), 0, np.arange(len(lower))))                # forward-fill it across zero-width days
+    lower = np.where(np.isnan(lower[idx]), 0.5, lower[idx])
+    return p50 - widest * lower, p50 + widest * (1 - lower)
+
+
+def _summarize(profile: Profile, sim: Sim, horizon_months: int, A_all: dict[str, dict], daily_days: int = DAILY_DAYS) -> LiquidForecast:
     sch, p10, p50, p90 = sim.schedule, *sim.pct
     cal = _calibration() if OPTIONS["calibrate"] else None
     p10d, p90d, p10m, p90m = p10, p90, p10, p90                # daily-chart bands and monthly-chart bands
     if cal:                                                    # scale the bands around the median by the horizon's factor
         fd, fm = band_factors(cal["daily_factors"], sch.days), band_factors(cal["month_end_factors"], sch.days)
-        p10d, p90d = p50 - (p50 - p10) * fd, p50 + (p90 - p50) * fd
-        p10m, p90m = p50 - (p50 - p10) * fm, p50 + (p90 - p50) * fm
+        p10d, p90d = no_narrowing(p50, p50 - (p50 - p10) * fd, p50 + (p90 - p50) * fd)
+        p10m, p90m = no_narrowing(p50, p50 - (p50 - p10) * fm, p50 + (p90 - p50) * fm)
     day = lambda i: sch.as_of + timedelta(days=int(i))
     risk = lambda name: Shortfall(buffer=sim.risks[name][0], probability=sim.risks[name][1], probability_90d=sim.risks[name][2],
                                   first_date_p50=_first_below(p50, sim.risks[name][0], sch.as_of),
@@ -493,7 +507,7 @@ def _summarize(profile: Profile, sim: Sim, horizon_months: int, A_all: dict[str,
     return LiquidForecast(
         profile_id=profile.id, as_of_date=sch.as_of, horizon_months=horizon_months, paths=sim.paths, start_liquid=sim.start_liquid,
         end_balance=monthly[-1], balance_12m=monthly[11] if len(monthly) >= 12 else None,
-        daily=PercentileBands(p10=p10d[:DAILY_DAYS + 1].tolist(), p50=p50[:DAILY_DAYS + 1].tolist(), p90=p90d[:DAILY_DAYS + 1].tolist()),
+        daily=PercentileBands(p10=p10d[:daily_days + 1].tolist(), p50=p50[:daily_days + 1].tolist(), p90=p90d[:daily_days + 1].tolist()),
         monthly=monthly,
         low_point=LowPoint(day=day(low), p50=float(p50[low]), p10=float(p10d[low])),
         overdraft_risk=risk("overdraft"), cushion_risk=risk("cushion"),
@@ -721,7 +735,7 @@ def backtest_for(profile: Profile) -> Backtest | None:
 
 # ------------------------------------------------------------------ 6. formulas
 def _forecast(profile: Profile, horizon_months: int, paths: int | None, cushion: float | None, seed: int,
-              changes: list[ForecastChange] | None, with_backtest: bool) -> LiquidForecast:
+              changes: list[ForecastChange] | None, with_backtest: bool, daily_days: int = DAILY_DAYS) -> LiquidForecast:
     A_all = load_assumptions()
     A = {k: v["value"] for k, v in A_all.items()}
     paths = int(paths or A["forecast_paths"])
@@ -729,7 +743,7 @@ def _forecast(profile: Profile, horizon_months: int, paths: int | None, cushion:
     cushion = essential_monthly(profile) if cushion is None else cushion
     cal = _calibration() if OPTIONS["calibrate"] else None
     out = _summarize(profile, _simulate(profile, horizon_months, paths, cushion, key, A, changes, cal["month_end_factors"] if cal else None),
-                     horizon_months, A_all)
+                     horizon_months, A_all, daily_days)
     if with_backtest:
         out = out.model_copy(update={"backtest": backtest_for(profile)})
     return out
@@ -753,6 +767,12 @@ def forecast_liquid(profile: Profile, *, horizon_months: int = DEFAULT_HORIZON_M
     Two risk outputs: `overdraft_risk` (balance below $0, the urgent alert) and `cushion_risk` (below `cushion`, default one
     month of essential expenses; the default health indicator)."""
     return _forecast(profile, horizon_months, paths, cushion, seed, changes, with_backtest)
+
+
+def forecast_for_chart(profile: Profile, horizon_months: int) -> LiquidForecast:
+    """The same forecast as forecast_liquid (identical numbers, default arguments), but with a daily band for the whole horizon instead of
+    the first DAILY_DAYS days, so a chart can plot one resolution throughout. Not registered: it is not a tool for the agents."""
+    return _forecast(profile, horizon_months, None, None, 0, None, False, daily_days=horizon_months * 31)
 
 
 @register("forecast_liquid_summary", args=ForecastArgs, result=LiquidForecast, category="forecast")

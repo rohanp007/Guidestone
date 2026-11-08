@@ -10,7 +10,7 @@ from .. import config
 from ..auth import User, current_user
 from ..data.loader import load_profiles
 from ..data.models import Base, LiquidForecast, Profile
-from ..formulas.forecast import forecast_liquid
+from ..formulas.forecast import forecast_for_chart
 from ..llm.facts import forecast_facts
 from . import profiles
 from .schemas import TransactionPage
@@ -37,7 +37,7 @@ _FORECASTS: dict[str, LiquidForecast] = {}      # deterministic (fixed seed), so
 
 def _forecast(profile: Profile) -> LiquidForecast:
     if profile.id not in _FORECASTS:
-        _FORECASTS[profile.id] = forecast_liquid(profile, horizon_months=FORECAST_MONTHS, with_backtest=False)
+        _FORECASTS[profile.id] = forecast_for_chart(profile, FORECAST_MONTHS)
     return _FORECASTS[profile.id]
 
 
@@ -63,7 +63,7 @@ def my_transactions(
 
 @router.get("/forecast", response_model=LiquidForecast)
 def my_forecast(profile: Profile = Depends(own_profile)):
-    """180-day liquid-cash forecast: daily bands for the first 90 days, month-end points after that."""
+    """180-day liquid-cash forecast with a daily band for every day of the horizon."""
     return SafeJSONResponse(to_plain(_forecast(profile)))
 
 
