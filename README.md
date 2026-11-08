@@ -185,7 +185,7 @@ Plus check scripts in `scripts/` (`check_derive.py`, `check_forecast.py`, `payof
 ## Limitations and future work
 
 - **Synthetic data.** Methods don't depend on the generator; some numbers might.
-- **Research is a cited, cached pack, not live search.** 6 cars, fetched once.
+- **Research is a cited, cached pack, not live search.** 3 cars, fetched once.
 - **Local inference only.** A hosted fallback and a data minimizer for it are designed, not built.
 - **Next Steps:** a Presenter agent; a Plan screen (retirement, education); Buy for homes.
 - **Forecast:** calibration covers 6 months (held flat beyond); validated across customers, not across time; no within-month transaction timing (the daily band's ~x8 factor stands in for it); three what-if types return 501.
