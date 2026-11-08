@@ -55,6 +55,8 @@ def clear() -> None:
         except RuntimeError:                      # its event loop is already closed
             pass
     _RUNS.clear()
+    from . import stream                      # progress logs of runs in flight (imported here: stream does not import the cache)
+    stream.clear()
 
 
 async def run_exclusive(customer_id: str, event: str, key: tuple, make: Callable[[], Awaitable[Any]], restart: bool = False) -> Any:

@@ -225,6 +225,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/me/agent/{event}/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Event Stream
+         * @description Same body and result as the plain endpoint, with the run's progress as server-sent events (plain-language labels only).
+         */
+        post: operations["run_event_stream_api_me_agent__event__stream_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/me/profile": {
         parameters: {
             query?: never;
@@ -1377,6 +1397,47 @@ export interface components {
             /** Warnings */
             warnings: components["schemas"]["PayoffWarning"][];
         };
+        /** StreamDetail */
+        StreamDetail: {
+            /** Formula */
+            formula?: string | null;
+            /** Ms */
+            ms?: number | null;
+            /** Check */
+            check?: string | null;
+            /** Outcome */
+            outcome?: ("passed" | "retried" | "template") | null;
+            /** Cached */
+            cached?: boolean | null;
+        };
+        /**
+         * StreamEvent
+         * @description One server-sent event. type "progress": agent, phase, label and detail are set. type "result": `result` is the full AnalysisResult.
+         *     type "error": the run produced no result (label says so).
+         */
+        StreamEvent: {
+            /**
+             * Type
+             * @default progress
+             * @enum {string}
+             */
+            type?: "progress" | "result" | "error";
+            /** Run Id */
+            run_id: string;
+            /** Seq */
+            seq: number;
+            /** T Ms */
+            t_ms: number;
+            /** Agent */
+            agent?: ("orchestrator" | "compute" | "advisor" | "presenter" | "researcher") | null;
+            /** Phase */
+            phase?: ("start" | "step" | "done" | "error") | null;
+            /** Label */
+            label?: string | null;
+            /** @default {} */
+            detail?: components["schemas"]["StreamDetail"];
+            result?: components["schemas"]["AnalysisResult"] | null;
+        };
         /** Subscription */
         Subscription: {
             /** Name */
@@ -2473,6 +2534,39 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    run_event_stream_api_me_agent__event__stream_post: {
+        parameters: {
+            query?: {
+                refresh?: number;
+            };
+            header?: never;
+            path: {
+                event: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description text/event-stream. One StreamEvent per `data:` line (event: progress), then a final event of type result (the full AnalysisResult) or error. A cached result replays its stored steps with detail.cached; a run in flight is joined. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StreamEvent"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
             };
         };
     };

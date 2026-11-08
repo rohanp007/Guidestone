@@ -9,6 +9,7 @@ formulas; judgments are labels computed in code; the trace holds tool names, cod
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import json
 import logging
 import os
@@ -27,6 +28,7 @@ from ..llm.prompts import EXPLAIN_PROMPT
 from ..llm.tools import Tool, session_tool
 from . import advisor, cache, payoff_advisor
 from .events import EventSpec, get_event
+from . import stream as stream_mod
 from .models import MAX_STEPS, Advice, AnalysisResult, PayoffAnalysis, GroundingSummary, HeadlineSummary, Plan, PlanStep, TraceStep
 from .prompts import ORCH_PLAN_V1, PROMPT_VERSION, TOOL_HINTS
 
@@ -60,6 +62,17 @@ class _State:
     pf_parts: tuple | None = None                        # (summary, chosen strategy, verdict, simulation)
     degraded: bool = False
     llm_trace: list[dict] = field(default_factory=list)
+    stream: stream_mod.RunStream | None = None           # progress events for this run (the /stream endpoint); the trace feeds it
+
+    def __post_init__(self):
+        if self.stream is not None:
+            self.trace = stream_mod.TraceList(self.stream)
+
+
+def _say(st: _State, agent: str, phase: str, label: str, **detail) -> None:
+    """A progress event for a step that is about to start (finished steps are reported by the trace itself)."""
+    if st.stream is not None:
+        st.stream.progress(agent, phase, label, **detail)
 
 
 def _canon(tool: str, args: dict) -> str:
@@ -91,6 +104,7 @@ async def _timed(st: _State, kind: str, name: str, coro, **detail):
 async def precompute(st: _State) -> None:
     """Every formula the event always needs. A failure here is a bug, not a model problem: the run fails."""
     tools = [(s, session_tool(st.profile, s.tool)) for s in st.spec.precompute]
+    _say(st, "compute", "start", stream_mod.LABELS["calc"][0])
 
     async def one(step: PlanStep, tool: Tool):
         value, ok = await _timed(st, "precompute", step.tool, tool.arun(step.args))
@@ -102,6 +116,7 @@ async def precompute(st: _State) -> None:
         st.seen.add(_canon(step.tool, tool.validate(step.args).model_dump()))
         st.compute[step.tool] = to_plain(value)
         st.raw[step.tool] = value
+    _say(st, "compute", "done", stream_mod.LABELS["calc"][1])
 
 
 # ---- facts ---------------------------------------------------------------------------------------------------------------------
@@ -161,6 +176,7 @@ async def plan_steps(st: _State) -> list[tuple[PlanStep, Tool, dict]]:
     """One structured LLM call. Never raises because planning failed: the event's default plan takes over."""
     allowed = st.spec.tools_for(st.profile)
     t0 = time.perf_counter()
+    _say(st, "orchestrator", "start", stream_mod.LABELS["plan"][0])
     try:
         res = await client.complete("orchestrator", _planner_messages(st, [session_tool(st.profile, t) for t in allowed]),
                                     json_schema=Plan, max_tokens=PLAN_MAX_TOKENS, schema_in_prompt=False)
@@ -202,6 +218,7 @@ def _template_summary(st: _State) -> HeadlineSummary:
 
 
 async def explain(st: _State) -> None:
+    _say(st, "presenter", "start", stream_mod.LABELS["summary"][0])
     messages = [{"role": "system", "content": EXPLAIN_PROMPT}, {"role": "user", "content": model_view(st.facts)}]
     t0 = time.perf_counter()
     try:
@@ -234,6 +251,7 @@ async def run_rules(st: _State) -> None:
 
 
 async def advise(st: _State) -> None:
+    _say(st, "advisor", "start", stream_mod.LABELS["advice"][0])
     t0 = time.perf_counter()
     try:
         st.advice = await advisor.advise(st.rules, st.facts)
@@ -266,6 +284,7 @@ async def _pipeline_payoff(st: _State) -> None:
     st.llm_trace = client.start_run()
     given = {k: st.inputs[k] for k in ("extra_monthly", "lump_sum") if st.inputs.get(k) is not None}
     tool = session_tool(st.profile, "payoff_strategies_summary")
+    _say(st, "compute", "start", stream_mod.LABELS["compare"][0])
     summary, ok = await _timed(st, "precompute", "payoff_strategies_summary", tool.arun(given))
     if not ok:
         raise summary
@@ -285,6 +304,7 @@ async def _pipeline_payoff(st: _State) -> None:
     verdict = payoff_advisor.verdict_for(summary, chosen)
     # the full result (schedule and month-end bands) is for the screen, not a model: so the registry, not an agent tool
     formula = FORMULAS["simulate_payoff"]
+    _say(st, "compute", "start", stream_mod.LABELS["simulate"][0])
     sim_args = formula.args.model_validate({"strategy": code, **given}).model_dump()
     simulation, ok = await _timed(st, "tool", "simulate_payoff",
                                   asyncio.to_thread(formula.fn, st.profile, **{k: v for k, v in sim_args.items() if k != "order"}), strategy=code)
@@ -296,6 +316,7 @@ async def _pipeline_payoff(st: _State) -> None:
     st.facts = dict(st.pf.values)
     st.pf_parts = (summary, chosen, verdict, simulation)
     t0 = time.perf_counter()
+    _say(st, "advisor", "start", stream_mod.LABELS["answer"][0])
     ans = await payoff_advisor.answer(summary, chosen, st.pf, verdict)
     st.trace.append(TraceStep(kind="advise", name="advisor", ms=round((time.perf_counter() - t0) * 1000, 1),
                               detail={"source": ans.source, "retried": ans.diagnostics.retried, "first_try_ok": ans.diagnostics.first_try_ok,
@@ -396,15 +417,88 @@ async def run(event: str, profile: Profile, params: dict, refresh: bool = False,
         return hit.with_trace(TraceStep(kind="cache_hit", name=event))
 
     async def go() -> AnalysisResult:
-        result = await _execute(_State(spec, profile, args), data_version)
-        if spec.cache != "none":
-            transient = is_transient(result)
-            cache.put(key, result, ttl=TRANSIENT_TTL_S if transient else None)
-            if transient and not rerun:
-                _schedule_rerun(event, profile, args)
-        return result
+        rs = _NEW_STREAM.get() or stream_mod.RunStream(uuid.uuid4().hex[:12])
+        _NEW_STREAM.set(None)                   # a background rerun started from here must not inherit this run's stream
+        rs.started = True
+        stream_mod.register(key, rs)
+        rs.progress("orchestrator", "start", stream_mod.LABELS["start"])
+        try:
+            result = await _execute(_State(spec, profile, args, run_id=rs.run_id, stream=rs), data_version)
+            if spec.cache != "none":
+                transient = is_transient(result)
+                cache.put(key, result, ttl=TRANSIENT_TTL_S if transient else None)
+                if transient and not rerun:
+                    _schedule_rerun(event, profile, args)
+            rs.finish(result)
+            return result
+        except asyncio.CancelledError:
+            rs.fail(stream_mod.LABELS["superseded"])
+            raise
+        except BaseException:
+            rs.fail(stream_mod.LABELS["failed"])
+            raise
+        finally:
+            stream_mod.release(key, rs)
 
     return await cache.run_exclusive(profile.id, event, key, go, restart=refresh)
+
+
+_drivers: set[asyncio.Task] = set()
+_NEW_STREAM: contextvars.ContextVar[stream_mod.RunStream | None] = contextvars.ContextVar("new_stream", default=None)
+
+
+async def open_stream(event: str, profile: Profile, params: dict, refresh: bool = False):
+    """Validates like run() (KeyError / ValidationError raise here, before any event), then returns an async iterator of StreamEvents:
+    a cached result replays its stored trace (cached=True); a run in flight is joined; otherwise a new run is started. Ends after the
+    final "result" (or "error") event. A subscriber that goes away leaves the run going."""
+    spec = get_event(event)
+    args = spec.params.model_validate(params).model_dump(mode="json")
+    key = cache.cache_key(profile.id, event, args, PROMPT_VERSION, loader.cache_key()[:12])
+    hit = None if (spec.cache == "none" or refresh) else cache.get(key)
+    events: list | None = None
+    sub: stream_mod.RunStream | None = None             # the stream this caller listens to
+    if hit is not None:
+        events = stream_mod.replay(hit.with_trace(TraceStep(kind="cache_hit", name=event)))
+    else:
+        sub = None if refresh else stream_mod.active(key)
+        if sub is None:                                 # nothing in flight: start the run, with a stream made here
+            sub = stream_mod.RunStream(uuid.uuid4().hex[:12])
+            _NEW_STREAM.set(sub)
+            _drivers.add(driver := asyncio.ensure_future(_drive(sub, event, profile, params, refresh)))   # copies the context: go() finds it
+            driver.add_done_callback(_drivers.discard)
+            _NEW_STREAM.set(None)
+    q = sub.subscribe() if sub is not None else None
+
+    async def gen():
+        try:
+            if events is not None:
+                for ev in events:
+                    yield ev
+                return
+            while (ev := await q.get()) is not None:
+                yield ev
+        finally:
+            if sub is not None and q is not None:
+                sub.unsubscribe(q)               # the run itself carries on: its result still lands in the cache
+    return gen()
+
+
+async def _drive(rs: stream_mod.RunStream, event: str, profile: Profile, params: dict, refresh: bool) -> None:
+    """Runs the event for a stream subscriber. If run() did not use `rs` (the work was already done or in flight by the time it started),
+    the subscriber still gets the result."""
+    try:
+        result = await run(event, profile, params, refresh=refresh)
+    except asyncio.CancelledError:
+        raise
+    except BaseException as e:
+        if not rs.started:
+            rs.fail(stream_mod.LABELS["superseded"] if isinstance(e, cache.RunSuperseded) else stream_mod.LABELS["failed"])
+        return
+    if not rs.started:
+        rs.progress("orchestrator", "start", stream_mod.LABELS["start"])
+        for step in result.trace:
+            rs.step(step)
+        rs.finish(result)
 
 
 def is_cache_hit(result: AnalysisResult) -> bool:
