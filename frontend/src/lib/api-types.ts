@@ -641,6 +641,14 @@ export interface components {
         /** BuyPlan */
         BuyPlan: {
             /**
+             * Status
+             * @default ok
+             * @enum {string}
+             */
+            status?: "ok" | "infeasible";
+            /** Warnings */
+            warnings?: components["schemas"]["BuyWarning"][];
+            /**
              * Code
              * @enum {string}
              */
@@ -660,18 +668,18 @@ export interface components {
             /** Total Cost */
             total_cost: number;
             /** Cash After */
-            cash_after: number;
+            cash_after: number | null;
             /** Payment Share Of Gross */
             payment_share_of_gross: number;
             /** Payment Ok */
             payment_ok: boolean;
             /** Cushion Floor */
             cushion_floor: number;
-            cushion: components["schemas"]["SimSummary"];
+            cushion: components["schemas"]["SimSummary"] | null;
             /** Cushion Shortfall */
-            cushion_shortfall: number;
+            cushion_shortfall: number | null;
             /** Cushion Holds */
-            cushion_holds: boolean;
+            cushion_holds: boolean | null;
             apr_source?: components["schemas"]["SourceRef"] | null;
             /**
              * Same As Cash
@@ -728,6 +736,24 @@ export interface components {
             payment_ok: boolean;
             /** Cushion Holds */
             cushion_holds: boolean;
+            /** Verdict Cap */
+            verdict_cap?: "competes_with_high_apr_debt" | null;
+            /**
+             * High Apr Debt Open
+             * @default false
+             */
+            high_apr_debt_open?: boolean;
+            /** High Apr Debt Apr */
+            high_apr_debt_apr?: number | null;
+            /**
+             * Caption
+             * @default
+             */
+            caption?: string;
+            /** Baseline Month Low P10 */
+            baseline_month_low_p10?: number[];
+            /** Scenario Month Low P10 */
+            scenario_month_low_p10?: number[];
             /** Baseline Monthly */
             baseline_monthly?: components["schemas"]["MonthEndPoint"][] | null;
             /** Scenario Monthly */
@@ -747,6 +773,21 @@ export interface components {
              * @default []
              */
             priorities?: ("price" | "mpg" | "safety")[];
+        };
+        /** BuyWarning */
+        BuyWarning: {
+            /**
+             * Code
+             * @enum {string}
+             */
+            code: "not_enough_cash" | "overdraft_risk" | "competes_with_high_apr_debt";
+            /** Amount */
+            amount?: number | null;
+            /**
+             * Detail
+             * @default
+             */
+            detail?: string;
         };
         /** CategoryShare */
         CategoryShare: {
@@ -1430,6 +1471,16 @@ export interface components {
             diff: components["schemas"]["SimDiff"];
             /** Baseline Monthly */
             baseline_monthly: components["schemas"]["MonthEndPoint"][] | null;
+            /**
+             * Baseline Month Low P10
+             * @default []
+             */
+            baseline_month_low_p10?: number[];
+            /**
+             * Scenario Month Low P10
+             * @default []
+             */
+            scenario_month_low_p10?: number[];
             /** Scenario Monthly */
             scenario_monthly: components["schemas"]["MonthEndPoint"][] | null;
             /** Flows */

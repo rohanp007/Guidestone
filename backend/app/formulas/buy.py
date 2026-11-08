@@ -24,6 +24,7 @@ from . import forecast as fc
 from .debt import amortized_payment
 from .payoff import SimSummary
 from .registry import register
+from . import rules
 from .rules import _liquid
 
 PlanCode = Literal["cash", "finance", "mix"]
@@ -38,7 +39,15 @@ class SourceRef(Base):
     fetched_at: str
 
 
+class BuyWarning(Base):
+    code: Literal["not_enough_cash", "overdraft_risk", "competes_with_high_apr_debt"]
+    amount: float | None = None               # not_enough_cash: how much cash is missing; overdraft_risk: the lowest bad-luck cash; competes: the debt's APR
+    detail: str = ""
+
+
 class BuyPlan(Base):
+    status: Literal["ok", "infeasible"] = "ok"    # infeasible: the plan needs more cash than there is; its cash metrics are null
+    warnings: list[BuyWarning] = Field(default_factory=list)
     code: PlanCode
     name: str
     down_payment: float                       # cash paid at purchase
@@ -47,13 +56,13 @@ class BuyPlan(Base):
     term_months: int
     total_interest: float
     total_cost: float                         # price + interest
-    cash_after: float                         # liquid cash right after buying
+    cash_after: float | None                  # liquid cash right after buying
     payment_share_of_gross: float             # monthly payment / gross monthly income
     payment_ok: bool
     cushion_floor: float
-    cushion: SimSummary                       # cash forecast with this purchase
-    cushion_shortfall: float                  # how far the bad-luck cash gets under the floor (0 = never)
-    cushion_holds: bool
+    cushion: SimSummary | None                # cash forecast with this purchase (daily-low basis)
+    cushion_shortfall: float | None           # how far the bad-luck daily low gets under the floor (0 = never)
+    cushion_holds: bool | None
     apr_source: SourceRef | None = None       # where the loan rate came from (None: no loan in this plan)
     same_as_cash: bool = False                # the safe lump covers the whole price, so mix is just cash
 
@@ -76,6 +85,12 @@ class BuyPlans(Base):
     verdict: Verdict
     payment_ok: bool
     cushion_holds: bool
+    verdict_cap: Literal["competes_with_high_apr_debt"] | None = None   # why the verdict was held at stretch
+    high_apr_debt_open: bool = False          # waterfall step 3 (high-interest debt) is not done
+    high_apr_debt_apr: float | None = None    # the dearest such debt's APR (fraction)
+    caption: str = ""                         # the chart caption, on the same daily-low basis as months_p10_below_cushion
+    baseline_month_low_p10: list[float] = Field(default_factory=list)   # each month's lowest daily p10, without the purchase
+    scenario_month_low_p10: list[float] = Field(default_factory=list)   # ... and with the recommended plan
     baseline_monthly: list[MonthEndPoint] | None = None   # month-end p10 / p50 / p90 cash without the purchase (the recommended plan's run)
     scenario_monthly: list[MonthEndPoint] | None = None   # ... and with the recommended plan
 
@@ -85,10 +100,16 @@ class BuyPlansArgs(Base):
 
 
 def _plan(profile: Profile, base: sm.Baseline, code: PlanCode, price: float, down: float, apr: float, term: int, floor: float, slack: float,
-          gross: float, liquid: float, max_share: float, src: SourceRef) -> tuple[BuyPlan, sm.SimulationResult]:
+          gross: float, liquid: float, max_share: float, src: SourceRef) -> tuple[BuyPlan, sm.SimulationResult | None]:
     loan = round(price - down, 2)
     pay = amortized_payment(loan, apr, term) if loan > 0 else 0.0
     interest = pay * term - loan if loan > 0 else 0.0
+    if down > liquid + 0.005:                                      # more cash than there is: no forecast, no metrics
+        miss = round(down - liquid, 2)
+        return BuyPlan(code=code, name=NAMES[code], status="infeasible", down_payment=round(down, 2), loan_amount=loan, monthly_payment=0.0, term_months=0,
+                       total_interest=0.0, total_cost=round(price, 2), cash_after=None, payment_share_of_gross=0.0, payment_ok=True,
+                       cushion_floor=round(floor, 2), cushion=None, cushion_shortfall=None, cushion_holds=None,
+                       warnings=[BuyWarning(code="not_enough_cash", amount=miss, detail=f"{miss:,.0f} more cash than the account holds")]), None
     scen = sm.Scenario(purchase_now=down or None, add_loan=sm.AddLoan(principal=loan, apr=apr, term_months=term, disbursed_to_cash=False) if loan > 0 else None)
     res = sm.simulate(profile, scen, baseline=base)
     short = max(0.0, floor - res.scenario_summary.min_p10)
@@ -96,7 +117,30 @@ def _plan(profile: Profile, base: sm.Baseline, code: PlanCode, price: float, dow
                    total_interest=round(interest, 2), total_cost=round(price + interest, 2), cash_after=round(liquid - down, 2),
                    payment_share_of_gross=round(pay / gross, 4), payment_ok=pay <= max_share * gross + 1e-9, cushion_floor=round(floor, 2),
                    cushion=res.scenario_summary, cushion_shortfall=round(short, 2), cushion_holds=short <= slack,
-                   apr_source=src if loan > 0 else None), res
+                   apr_source=src if loan > 0 else None,
+                   warnings=[BuyWarning(code="overdraft_risk", amount=round(res.scenario_summary.min_p10, 2), detail="bad-luck cash goes below $0")]
+                   if res.scenario_summary.min_p10 < 0 else []), res
+
+
+def _money(x: float) -> str:
+    return f"-${abs(x):,.0f}" if x < 0 else f"${x:,.0f}"
+
+
+def _caption(res: sm.SimulationResult, floor: float) -> str:
+    """The chart caption, on the daily-low basis of min_p10 and months_p10_below_cushion: each month's lowest daily p10, not the month-end."""
+    low_s, low_b = min(res.scenario_month_low_p10), min(res.baseline_month_low_p10)
+    names = [m.day.strftime("%b") for m, low in zip(res.scenario_monthly or [], res.scenario_month_low_p10) if low < floor]
+    tail = f"That is below the {_money(floor)} cushion target in {', '.join(names)}." if names else f"That stays above the {_money(floor)} cushion target."
+    return f"In a bad stretch (10th percentile), the lowest daily cash is {_money(low_s)} with this plan and {_money(low_b)} without it. {tail}"
+
+
+def _high_apr_debt(profile: Profile) -> tuple[bool, float | None]:
+    """Waterfall step 3 open (high-interest debt not done), and the dearest such debt's APR."""
+    step = next(x for x in rules.priority_waterfall(profile).steps if x.step == 3)
+    if step.status in ("done", "not_applicable"):
+        return False, None
+    ids = set(step.detail.get("accounts", []))
+    return True, max((a.rate for a in profile.accounts if a.id in ids), default=None)
 
 
 def verdict_for(payment_ok: bool, cushion_holds: bool) -> Verdict:
@@ -124,8 +168,13 @@ def buy_plans_for(profile: Profile, vehicle_id: str | None, base: sm.Baseline | 
             for code, down in (("cash", price), ("finance", 0.0), ("mix", down_mix))}
     plans = {k: m[0] for k, m in made.items()}
     plans["mix"].same_as_cash = down_mix >= price
+    high_open, high_apr = _high_apr_debt(profile)
+    if high_open:                                                   # cash spent here is cash not paying down the dearest debt
+        for pl in plans.values():
+            if pl.down_payment > 0 and pl.status == "ok":
+                pl.warnings.append(BuyWarning(code="competes_with_high_apr_debt", amount=high_apr, detail="the cash could pay down debt at this rate"))
     savings = float(T["safe_savings_rate"])
-    if apr > savings and plans["cash"].cushion_holds:
+    if apr > savings and plans["cash"].status == "ok" and plans["cash"].cushion_holds:
         rec, why = "cash", "cash_keeps_cushion"
     elif apr > savings and safe > 0:
         rec, why = "mix", "cash_would_break_cushion"
@@ -134,11 +183,18 @@ def buy_plans_for(profile: Profile, vehicle_id: str | None, base: sm.Baseline | 
     else:
         rec, why = "finance", "loan_cheaper_than_savings"
     chosen = plans[rec]
-    verdict = verdict_for(chosen.payment_ok, chosen.cushion_holds)
+    verdict = verdict_for(chosen.payment_ok, bool(chosen.cushion_holds))
+    cap = None
+    if high_open and verdict == "affordable":                       # step 3 open: not a clean yes while expensive debt is waiting
+        verdict, cap = "stretch", "competes_with_high_apr_debt"
+    res = made[rec][1]
+    lows_b, lows_s = (res.baseline_month_low_p10, res.scenario_month_low_p10) if res else ([], [])
     return BuyPlans(profile_id=profile.id, vehicle_id=v["id"], vehicle_name=v["name"], price=price, credit_tier=tier["tier"], loan_apr=round(apr, 4),
                     savings_rate=savings, safe_lump_sum=round(safe, 2), gross_monthly=round(gross, 2), apr_source=src, plans=plans, recommended=rec,  # type: ignore[arg-type]
-                    recommended_reason=why, verdict=verdict, payment_ok=chosen.payment_ok, cushion_holds=chosen.cushion_holds,
-                    baseline_monthly=made[rec][1].baseline_monthly, scenario_monthly=made[rec][1].scenario_monthly)  # type: ignore[arg-type]
+                    recommended_reason=why, verdict=verdict, payment_ok=chosen.payment_ok, cushion_holds=bool(chosen.cushion_holds),
+                    verdict_cap=cap, high_apr_debt_open=high_open, high_apr_debt_apr=round(high_apr, 4) if high_apr is not None else None,
+                    caption=_caption(res, floor) if res else "", baseline_month_low_p10=lows_b, scenario_month_low_p10=lows_s,
+                    baseline_monthly=res.baseline_monthly if res else None, scenario_monthly=res.scenario_monthly if res else None)  # type: ignore[arg-type]
 
 
 @register("buy_plans", args=BuyPlansArgs, result=BuyPlans, category="buy")

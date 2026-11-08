@@ -199,6 +199,8 @@ class SimulationResult(Base):
     scenario_summary: SimSummary
     diff: SimDiff                                            # scenario - baseline
     baseline_monthly: list[MonthEndPoint] | None             # month-end p10 / p50 / p90 (calibrated), for charts
+    baseline_month_low_p10: list[float] = []                 # each month's lowest DAILY p10 (the basis of min_p10 and months_p10_below_cushion)
+    scenario_month_low_p10: list[float] = []
     scenario_monthly: list[MonthEndPoint] | None
     flows: int                                               # dated flows the scenario added (0: a no-op)
     plan: StrategyResult | None = None                       # the payoff plan behind the flows, if any
@@ -222,7 +224,8 @@ def simulate(profile: Profile, scenario: Scenario, days: int = 180, *, schedule:
     b, s = summarize(base.forecast, base.cushion), summarize(scen, base.cushion)
     return SimulationResult(profile_id=profile.id, days=base.days, horizon_months=base.horizon_months, paths=base.paths, cushion=round(base.cushion, 2),
                             baseline_summary=b, scenario_summary=s, diff=diff(b, s), baseline_monthly=base.forecast.monthly,
-                            scenario_monthly=scen.monthly, flows=len(flows), plan=plan, warnings=warnings)
+                            baseline_month_low_p10=[round(x, 2) for x in month_min_p10(base.forecast)],
+                            scenario_month_low_p10=[round(x, 2) for x in month_min_p10(scen)], scenario_monthly=scen.monthly, flows=len(flows), plan=plan, warnings=warnings)
 
 
 def cushion_impact(profile: Profile, schedule: Amortization, baseline: Baseline) -> CushionImpact:

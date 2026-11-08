@@ -15,7 +15,6 @@ function Chips({ items }: { items: string[] }) {
 }
 
 const MONTH_MS = 30.44 * 86_400_000;
-const monthName = (t: number) => new Intl.DateTimeFormat("en-US", { month: "short" }).format(t);
 
 function shadedBelow(points: { t: number; p10: number }[], floor: number): ShadedRange[] {
   const out: ShadedRange[] = [];
@@ -35,11 +34,11 @@ function CashChart({ view, floor, planName }: { view: BuyView; floor: number; pl
     { id: "base", label: "Without the purchase", points: bands.baseline, tone: "muted", band: true },
     { id: "plan", label: `With the purchase (${planName.toLowerCase()})`, points: bands.scenario, tone: "primary", band: true },
   ], [bands, planName]);
-  const shaded = useMemo(() => shadedBelow(bands.scenario, floor), [bands, floor]);
-  const low = bands.scenario.filter((p) => p.p10 < floor).map((p) => monthName(p.t));
+  // shading and caption use each month's lowest DAILY p10 (what "months below cushion" counts), not the month-end point
+  const lows = bands.scenarioLow.length === bands.scenario.length ? bands.scenarioLow : bands.scenario.map((p) => p.p10);
+  const shaded = useMemo(() => shadedBelow(bands.scenario.map((p, i) => ({ t: p.t, p10: lows[i] })), floor), [bands, lows, floor]);
   const end = bands.scenario[bands.scenario.length - 1], base = bands.baseline[bands.baseline.length - 1];
-  const text = `By ${dateLong(isoOf(end.t))}, median cash is ${money0(end.p50)} with the purchase and ${money0(base.p50)} without it. ` +
-    (low.length ? `In a bad stretch (10th percentile) it is below the ${money0(floor)} cushion at the end of ${low.join(", ")}.` : `In a bad stretch (10th percentile) it stays above the ${money0(floor)} cushion.`);
+  const text = `By ${dateLong(isoOf(end.t))}, median cash is ${money0(end.p50)} with the purchase and ${money0(base.p50)} without it. ${view.caption}`;
   return (
     <ForecastBand series={series} summary={text} summaryText={text} shadedRanges={shaded} refLines={[{ y: floor, label: "Cushion", style: "dash" }, { y: 0, label: "$0", style: "zero" }]} />
   );
@@ -54,8 +53,8 @@ export default function PlanSection({ view }: { view: BuyView }) {
       { key: "loan", label: "Loan", value: money0(p.loan), align: "right" },
       { key: "monthly", label: "Monthly", value: p.monthly > 0 ? money0(p.monthly) : "–", align: "right" },
       { key: "interest", label: "Interest", value: money0(p.totalInterest), align: "right" },
-      { key: "cash", label: "Lowest cash", value: money0(p.lowestCash), align: "right" },
-      { key: "below", label: "Months below", value: p.monthsBelow, align: "right" },
+      { key: "cash", label: "Lowest cash", value: p.lowestCash === null ? "–" : money0(p.lowestCash), align: "right" },
+      { key: "below", label: "Months below", value: p.monthsBelow ?? "–", align: "right" },
     ],
     notes: <Chips items={p.chips} />,
   }));
@@ -84,9 +83,9 @@ export default function PlanSection({ view }: { view: BuyView }) {
       {rec && (
         <section aria-label="Recommended plan summary">
           <StatRow items={[
-            { label: "Lowest cash", value: money0(rec.lowestCash), note: "In a tough month" },
-            { label: "Months below cushion", value: rec.monthsBelow },
-            { label: "Cash after buying", value: money0(rec.cashAfter) },
+            { label: "Lowest cash", value: rec.lowestCash === null ? "–" : money0(rec.lowestCash), note: "In a tough month" },
+            { label: "Months below cushion", value: rec.monthsBelow ?? "–" },
+            { label: "Cash after buying", value: rec.cashAfter === null ? "–" : money0(rec.cashAfter) },
             { label: "Total interest", value: money0(rec.totalInterest) },
           ]} />
         </section>

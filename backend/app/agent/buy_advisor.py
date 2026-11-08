@@ -61,6 +61,9 @@ def facts_for(p: BuyPlans) -> PayoffFacts:
         add("payment_share", chosen.payment_share_of_gross, pct, "the payment as a share of gross monthly income")
         add("payment_limit_share", 0.10, pct, "the share of gross income a car payment should stay under")
         mentions["payment_over"] = ("payment_share",)
+    if p.high_apr_debt_open and p.high_apr_debt_apr is not None:
+        add("high_apr_debt_apr", p.high_apr_debt_apr, pct, "the interest rate on the dearest debt you still owe")
+        mentions["high_apr_debt"] = ("high_apr_debt_apr",)
     if not chosen.cushion_holds:
         add("cushion_shortfall", chosen.cushion_shortfall, usd, "how far cash would fall under the cushion target in a bad stretch")
         mentions["cushion_short"] = ("cushion_shortfall",)
@@ -75,13 +78,18 @@ def template_source(p: BuyPlans, pf: PayoffFacts) -> str:
         first = "Putting {down_payment} down on the {car} and financing the rest means a {payment} monthly payment and about {total_interest} in interest."
     else:
         first = "Financing the {car} means a {payment} monthly payment and about {total_interest} in interest."
+    clauses = []
+    if "payment_over" in pf.mentions:
+        clauses.append("the payment is {payment_share} of your gross income, over the {payment_limit_share} line")
+    if "cushion_short" in pf.mentions:
+        clauses.append("in a bad stretch your cash would fall {cushion_shortfall} under your cushion target")
+    if "high_apr_debt" in pf.mentions:
+        clauses.append("the cash would otherwise go toward debt costing {high_apr_debt_apr} a year" if c.down_payment > 0
+                       else "you also still owe debt costing {high_apr_debt_apr} a year")
     second = ""
-    if "payment_over" in pf.mentions and "cushion_short" in pf.mentions:
-        second = " The payment is {payment_share} of your gross income, over the {payment_limit_share} line, and in a bad stretch your cash would fall {cushion_shortfall} under your cushion target."
-    elif "payment_over" in pf.mentions:
-        second = " The payment is {payment_share} of your gross income, over the {payment_limit_share} line."
-    elif "cushion_short" in pf.mentions:
-        second = " In a bad stretch your cash would fall {cushion_shortfall} under your cushion target."
+    if clauses:                                                     # one second sentence, however many points it carries
+        body = clauses[0] if len(clauses) == 1 else ", ".join(clauses[:-1]) + ", and " + clauses[-1]
+        second = " " + body[0].upper() + body[1:] + "."
     return (first + second).strip()
 
 
@@ -94,7 +102,8 @@ def model_view(p: BuyPlans, pf: PayoffFacts) -> str:
              f"The way to pay: {p.plans[p.recommended].name}.", "Placeholders you may use (write them exactly, with the braces):"]
     lines += [f"{{{k}}} = {v}" for k, v in pf.means.items()]
     notes = {"payment_over": "the payment is above the share of gross income a car payment should stay under",
-             "cushion_short": "in a bad stretch your cash would fall under the safety cushion"}
+             "cushion_short": "in a bad stretch your cash would fall under the safety cushion",
+             "high_apr_debt": "you still owe debt at a high interest rate, and cash spent on the car is cash not paying it down"}
     if pf.mentions:
         lines.append("Be sure to mention: " + "; ".join(f"{notes[k]} (use {', '.join('{' + n + '}' for n in names)})" for k, names in pf.mentions.items()) + ".")
     lines.append("Example (adapt it, keeping the braces): " + template_source(p, pf))

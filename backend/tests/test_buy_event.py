@@ -218,3 +218,24 @@ def test_the_endpoint_and_the_stream(profiles):
                                        ("advisor", "start", "Writing the answer"), ("advisor", "done", "Answer ready")]]
     assert order == sorted(order) and events[-1]["type"] == "result" and events[-1]["result"]["buy"]["verdict"] == "affordable"
     assert not any(k in e for e in events[:-1] for k in ("result", "prompt", "content"))
+
+
+def test_C067_answer_mentions_the_high_apr_debt(profiles):
+    params = {"segment": "midsize_sedan", "budget": 30_000, "priorities": ["price"], "choice_id": "honda_accord"}
+    r = go(profiles["C067"], Fake(), params)
+    b = r.buy
+    assert b.verdict == "stretch" and b.plans.recommended == "mix" and b.plans.plans["cash"].status == "infeasible"
+    assert b.answer.source == "model" and "24.8% a year" in b.answer.text and len(re.findall(r"(?<=[a-z%])\.\s", b.answer.text + " ")) == 2
+    cache.clear()
+    quiet = "Putting {down_payment} down on the {car} means a {payment} monthly payment."            # leaves the debt out
+    f = Fake(advice=quiet)
+    r = go(profiles["C067"], f, params)
+    assert r.buy.answer.source == "template" and "24.8% a year" in r.buy.answer.text and [c[0] for c in f.calls].count("advisor") == 2
+    assert "high_apr_debt" in str(r.buy.answer.diagnostics.first_reasons) or "warning_not_mentioned" in r.buy.answer.diagnostics.first_reasons
+
+
+def test_C002_and_C095_answers_are_unchanged_in_kind(profiles):
+    assert go(profiles["C095"], Fake()).buy.answer.text.endswith("in loan interest.")
+    cache.clear()
+    r = go(profiles["C002"], Fake(), {"segment": "midsize_sedan", "budget": 31_000, "priorities": ["mpg"]})
+    assert r.buy.verdict == "not_now" and "high_apr_debt" not in r.buy.answer.text

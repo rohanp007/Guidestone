@@ -38,7 +38,7 @@ def test_C002_cannot_afford_it_now(profiles):
     r = buy.buy_plans_for(profiles["C002"], "honda_accord")
     assert r.credit_tier == "subprime" and r.loan_apr == pytest.approx(0.1352) and r.safe_lump_sum == 0
     assert r.recommended == "finance" and r.recommended_reason == "no_safe_cash" and r.verdict == "not_now" and not r.payment_ok and not r.cushion_holds
-    assert r.plans["finance"].payment_share_of_gross > 0.10 and r.plans["cash"].cash_after < 0 < r.plans["cash"].cushion_shortfall
+    assert r.plans["finance"].payment_share_of_gross > 0.10 and r.plans["cash"].status == "infeasible" and r.plans["cash"].cash_after is None
     assert r.plans["mix"].down_payment == 0 and not r.plans["mix"].same_as_cash
 
 
@@ -70,3 +70,65 @@ def test_registered_and_serializable(profiles):
     assert "buy_plans" in FORMULAS
     out = FORMULAS["buy_plans"].fn(profiles["C095"], vehicle_id="mazda_cx5")
     assert out.model_dump_json() and out.plans["finance"].term_months == 60
+
+
+# ---- infeasible cash, overdraft warning, the high-APR-debt cap, the daily-low basis ----------------------------------------------------
+
+def test_C067_cash_is_infeasible_and_never_recommended(profiles):
+    r = buy.buy_plans_for(profiles["C067"], "honda_accord")
+    cash, fin, mix = (r.plans[k] for k in ("cash", "finance", "mix"))
+    assert cash.status == "infeasible" and [w.code for w in cash.warnings] == ["not_enough_cash"] and cash.warnings[0].amount == pytest.approx(28_395 - 20_714.98, abs=0.01)
+    assert cash.cash_after is None and cash.cushion is None and cash.cushion_shortfall is None and cash.cushion_holds is None
+    assert r.recommended == "mix" and r.recommended != "cash" and fin.status == mix.status == "ok"
+
+
+def test_C067_step_three_is_open_so_cash_competes_with_the_card(profiles):
+    r = buy.buy_plans_for(profiles["C067"], "honda_accord")
+    assert r.high_apr_debt_open and r.high_apr_debt_apr == pytest.approx(0.2484)
+    assert [w.code for w in r.plans["mix"].warnings] == ["competes_with_high_apr_debt"] and r.plans["mix"].warnings[0].amount == pytest.approx(0.2484)
+    assert r.plans["finance"].warnings == []                                                 # no cash leaves: nothing competes
+    assert r.verdict == "stretch"                                                              # the cushion already fails here, so the cap changes nothing
+
+
+def test_an_open_step_three_caps_an_affordable_verdict_at_stretch(profiles, monkeypatch):
+    r = buy.buy_plans_for(profiles["C095"], "honda_crv")
+    assert r.verdict == "affordable" and not r.high_apr_debt_open and r.verdict_cap is None
+    assert all(w.code != "competes_with_high_apr_debt" for pl in r.plans.values() for w in pl.warnings) and r.high_apr_debt_apr is None
+    monkeypatch.setattr(buy, "_high_apr_debt", lambda p: (True, 0.2184))
+    r = buy.buy_plans_for(profiles["C095"], "honda_crv")
+    assert r.recommended == "cash" and r.verdict == "stretch" and r.verdict_cap == "competes_with_high_apr_debt" and r.high_apr_debt_apr == pytest.approx(0.2184)
+    assert [w.code for w in r.plans["cash"].warnings] == ["competes_with_high_apr_debt"] and r.plans["finance"].warnings == []
+
+
+def test_not_now_is_not_raised_by_the_cap(profiles, monkeypatch):
+    monkeypatch.setattr(buy, "_high_apr_debt", lambda p: (True, 0.2))
+    r = buy.buy_plans_for(profiles["C002"], "honda_accord")
+    assert r.verdict == "not_now" and r.verdict_cap is None
+
+
+def test_a_plan_whose_bad_luck_cash_goes_below_zero_warns_of_overdraft(profiles, monkeypatch):
+    monkeypatch.setattr(pack, "price", lambda v: 80_000.0)
+    r = buy.buy_plans_for(profiles["C002"], "honda_accord")
+    seen = 0
+    for pl in r.plans.values():
+        codes = [w.code for w in pl.warnings]
+        if pl.cushion is not None:
+            assert ("overdraft_risk" in codes) == (pl.cushion.min_p10 < 0), pl.code
+            seen += pl.cushion.min_p10 < 0
+    assert seen >= 1 and r.plans["finance"].warnings[0].amount == pytest.approx(r.plans["finance"].cushion.min_p10, abs=0.01)
+    ok = buy.buy_plans_for(profiles["C095"], "honda_crv")
+    assert all(w.code != "overdraft_risk" for pl in ok.plans.values() for w in pl.warnings)
+
+
+@pytest.mark.parametrize("pid,vid", [("C067", "honda_accord"), ("C095", "honda_crv"), ("C002", "honda_accord")])
+def test_caption_and_below_cushion_facts_share_the_daily_low_basis(profiles, pid, vid):
+    r = buy.buy_plans_for(profiles[pid], vid)
+    chosen = r.plans[r.recommended]
+    floor = chosen.cushion_floor
+    lows = r.scenario_month_low_p10
+    assert len(lows) == len(r.scenario_monthly) and len(r.baseline_month_low_p10) == len(r.baseline_monthly)
+    assert sum(x < floor for x in lows) == chosen.cushion.months_p10_below_cushion                 # the same count, month by month
+    assert min(lows) == pytest.approx(chosen.cushion.min_p10, abs=0.01) and chosen.cushion_shortfall == pytest.approx(max(0, floor - min(lows)), abs=0.01)
+    assert buy._money(min(lows)) in r.caption and buy._money(min(r.baseline_month_low_p10)) in r.caption
+    below = [m.day.strftime("%b") for m, x in zip(r.scenario_monthly, lows) if x < floor]
+    assert (f"in {', '.join(below)}." in r.caption) if below else ("stays above" in r.caption)
