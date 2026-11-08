@@ -269,6 +269,7 @@ class SimulatePayoffArgs(Base):
     extra_monthly: float | None = Field(None, ge=0, description="Extra per month on top of minimums; omit to use the monthly surplus, 0 means none")
     lump_sum: float | None = Field(None, ge=0, description="One-time payment from cash at month 0; omit to use the safe lump sum, 0 means none")
     order: list[str] | None = Field(None, description="Account ids in the order extra money should go (strategy F)")
+    include_mortgage: bool = Field(False, description="Count the mortgage as a debt to pay down (it is left out by default)")
 
 
 class PayoffSimulation(Base):
@@ -293,10 +294,11 @@ def simulate_payoff_run(profile: Profile, *, strategy: str | None = None, extra_
 
 @register("simulate_payoff", args=SimulatePayoffArgs, result=PayoffSimulation, category="simulate")
 def simulate_payoff(profile: Profile, *, strategy: str | None = None, extra_monthly: float | None = None, lump_sum: float | None = None,
-                    order: list[str] | None = None) -> PayoffSimulation:
+                    order: list[str] | None = None, include_mortgage: bool = False) -> PayoffSimulation:
     """One payoff strategy in detail: its month-by-month schedule, and the liquid-cash forecast with its payments against the forecast
     as it stands (month-end bands for charts). Full result."""
-    return simulate_payoff_run(profile, strategy=strategy, extra_monthly=extra_monthly, lump_sum=lump_sum, order=order)
+    return simulate_payoff_run(profile, strategy=strategy, extra_monthly=extra_monthly, lump_sum=lump_sum, order=order,
+                               include_mortgage=include_mortgage)
 
 
 class PayoffSimulationSummary(Base):

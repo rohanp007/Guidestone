@@ -269,6 +269,12 @@ async def _pipeline_payoff(st: _State) -> None:
     summary, ok = await _timed(st, "precompute", "payoff_strategies_summary", tool.arun(given))
     if not ok:
         raise summary
+    if summary.no_debt and summary.excluded_mortgages:
+        # only a mortgage is owed: not "no debt". Run the plan with it in scope so the answer can compare its rate with savings.
+        given["include_mortgage"] = True
+        summary, ok = await _timed(st, "precompute", "payoff_strategies_summary", tool.arun(given))
+        if not ok:
+            raise summary
     st.compute["payoff_strategies_summary"] = to_plain(summary)
     if summary.no_debt:
         st.facts = {}

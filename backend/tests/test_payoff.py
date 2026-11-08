@@ -240,7 +240,7 @@ def test_registration_and_agent_tools(real):
     for name in ("payoff_strategies", "payoff_strategies_summary", "simulate_payoff", "simulate_payoff_summary"):
         assert name in FORMULAS
     assert set(FORMULAS["payoff_strategies"].args.model_fields) == {"extra_monthly", "lump_sum", "include_mortgage"}
-    assert set(FORMULAS["simulate_payoff"].args.model_fields) == {"strategy", "extra_monthly", "lump_sum", "order"}
+    assert set(FORMULAS["simulate_payoff"].args.model_fields) == {"strategy", "extra_monthly", "lump_sum", "order", "include_mortgage"}
     tool = session_tool(real["C059"], "payoff_strategies_summary")
     assert tool.fn(extra_monthly=100).strategies[0].code == "A"
     with pytest.raises(ValueError):

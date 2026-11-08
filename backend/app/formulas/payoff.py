@@ -149,6 +149,9 @@ class PayoffStrategiesSummary(Base):
     snowball_extra_cost: float | None
     strategies: list[StrategySummary]
     cushion: float | None
+    excluded_mortgages: list[str] = []        # mortgages left out of scope (the plan can be rerun with include_mortgage=True)
+    highest_debt_apr: float | None = None     # the dearest debt in scope
+    savings_rate: float | None = None         # what safe savings earn (rules' safe_savings_rate)
 
 
 # ---- orders ----------------------------------------------------------------------------------------------------------------------
@@ -366,4 +369,6 @@ def payoff_strategies_summary(profile: Profile, *, extra_monthly: float | None =
     return PayoffStrategiesSummary(profile_id=full.profile_id, no_debt=full.no_debt, no_surplus=full.no_surplus, extra_monthly=full.extra_monthly,
                                    lump_sum=full.lump_sum, safe_lump_sum=full.safe_lump_sum, recommended=full.recommended,
                                    snowball_extra_cost=full.snowball_extra_cost, cushion=full.cushion,
+                                   excluded_mortgages=full.excluded_mortgages, highest_debt_apr=max((d.apr for d in full.debts), default=None),
+                                   savings_rate=float(load_assumptions()["safe_savings_rate"]["value"]),
                                    strategies=[summarize_strategy(r) for r in full.strategies.values()])

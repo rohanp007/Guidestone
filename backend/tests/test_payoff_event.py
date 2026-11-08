@@ -132,7 +132,7 @@ def test_C059_lump_exceeds_debt(profiles):
 
 # ---- C095 (and every customer with no debt) -----------------------------------------------------------------------------------------
 
-@pytest.mark.parametrize("cid", ["C095", "C002", "C010"])
+@pytest.mark.parametrize("cid", ["C002", "C010"])
 def test_no_debt_is_deterministic_and_calls_no_model(profiles, cid):
     m = Model(example)
     r = go(profiles[cid], m)
@@ -240,4 +240,22 @@ def test_the_endpoint(profiles):
     assert c.post("/api/me/agent/simulate_payoff", json={"strategy": "F"}).status_code == 422
     assert c.post("/api/me/agent/simulate_payoff", json={"lump_sum": -1}).status_code == 422
     assert c.post("/api/me/agent/simulate_payoff", json={"customer_id": "C002"}).status_code == 422
-    assert session_for("C095").post("/api/me/agent/simulate_payoff", json={}).json()["payoff"]["verdict"] == "no_debt"
+    assert session_for("C095").post("/api/me/agent/simulate_payoff", json={}).json()["payoff"]["verdict"] == "keep_cash"
+
+
+# ---- only a mortgage is owed: keep_cash, not no_debt ---------------------------------------------------------------------------------
+
+def test_a_cheap_mortgage_alone_is_keep_cash_not_no_debt(profiles):
+    m = Model(example)
+    r = go(profiles["C095"], m)
+    p = r.payoff
+    assert p.verdict == "keep_cash" and p.recommended.code == "E" and [c.code for c in p.comparison] == list("ABCDE")
+    assert "2.8%" in p.answer.text and "3.7%" in p.answer.text, p.answer.text
+    summary = r.compute["payoff_strategies_summary"]
+    assert summary["no_debt"] is False and summary["excluded_mortgages"] == [] and summary["highest_debt_apr"] == pytest.approx(0.02773, abs=1e-4)
+
+
+def test_really_no_debt_stays_no_debt(profiles):
+    m = Model(example)
+    p = go(profiles["C010"], m).payoff
+    assert p.verdict == "no_debt" and m.calls == []

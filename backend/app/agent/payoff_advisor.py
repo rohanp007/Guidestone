@@ -22,7 +22,7 @@ from pydantic import BaseModel, Field
 
 from ..formulas.payoff import PayoffStrategiesSummary, StrategySummary
 from ..llm import client, config as llm_config, grounding
-from .advisor import ADVISOR_MAX_TOKENS, months as fmt_months, tidy, usd
+from .advisor import ADVISOR_MAX_TOKENS, months as fmt_months, pct, tidy, usd
 from .models import AdviceDiagnostics, BadReply, GroundingSummary, PayoffAnswer, PayoffVerdict
 
 MAX_SENTENCES = 2
@@ -112,6 +112,11 @@ def facts_for(summary: PayoffStrategiesSummary, chosen: StrategySummary) -> Payo
             ("unused_lump", add("unused_lump", w.unused_amount, usd, "the part of the lump sum the debts cannot take; it stays in cash")),
             ("safe_lump", add("safe_lump", summary.safe_lump_sum, usd, "the safe lump sum"))) if ok]
         mentions["lump_exceeds_debt"] = tuple(n for n in names if n == "unused_lump")
+    if verdict_for(summary, chosen) == "keep_cash" and summary.highest_debt_apr is not None and summary.savings_rate is not None:
+        for name, raw, meaning in (("debt_apr", summary.highest_debt_apr, "the interest rate on the dearest debt"),
+                                   ("savings_rate", summary.savings_rate, "what savings earn")):
+            values[name], text[name], means[name] = raw, pct(raw), meaning          # rates are fractions: not subject to the "zero" rule
+        return PayoffFacts(values, text, means, {"keep_cash": ("debt_apr", "savings_rate")}, chosen.code, chosen.months)
     result = tuple(n for n in ("payoff_months", "interest_saved") if n in values)          # the plan's main result is always worth a line
     if result:
         mentions = {"result": result, **mentions}
@@ -130,6 +135,8 @@ def template_source(verdict: PayoffVerdict, pf: PayoffFacts | None) -> str:
     if verdict == "no_debt":
         return "You have no debt to pay off."
     if verdict == "keep_cash":
+        if pf is not None and "keep_cash" in pf.mentions:
+            return "Your debt costs {debt_apr} a year, less than the {savings_rate} your savings earn, so extra payments are optional."
         return "Your debt costs less than your savings earn, so extra payments are optional."
     if verdict == "no_room":
         return "There is no money left over each month or above your cushion to put toward the debt, so only the minimum payments continue."
@@ -192,6 +199,7 @@ def model_view(summary: PayoffStrategiesSummary, chosen: StrategySummary, pf: Pa
     lines += [f"{{{k}}} = {v}" for k, v in pf.means.items()]
     notes = {"result": "what the plan achieves", "tradeoff_low_cushion": "your cash would run under the safety cushion for a while in a bad stretch",
              "exceeds_safe_lump": "the lump sum is more than the amount that keeps the cushion intact",
+             "keep_cash": "the debt's interest rate is lower than what savings earn (use both rates)",
              "lump_exceeds_debt": "the debts take only part of the lump sum, and the rest stays in cash"}
     if pf.mentions:
         lines.append("Be sure to mention: " + "; ".join(f"{notes[k]} (use {', '.join('{' + n + '}' for n in names)})" for k, names in pf.mentions.items()) + ".")
