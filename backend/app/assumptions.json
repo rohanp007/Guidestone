@@ -1,0 +1,27 @@
+{
+  "inflation_annual": {
+    "value": 0.0315,
+    "source": "Average of BLS CPI-U headline (3.7%) and core (2.6%, all items less food and energy), both 12 months ending Sep 2026, released 2026-10-14: https://www.bls.gov/news.release/cpi.htm. Chosen over headline alone because energy-driven spikes (energy +20.4%) usually fade over a 24-month horizon; not pure core because bills include utilities. Headline-only would be 3.7%.",
+    "as_of": "2026-09-30"
+  },
+  "raise_annual": {
+    "value": 0.031,
+    "source": "BLS Employment Cost Index, private-industry wages and salaries, 12 months ending Sep 2026 (released 2026-10-30): https://www.bls.gov/news.release/eci.nr0.htm",
+    "as_of": "2026-09-30"
+  },
+  "ss_cola_annual": {
+    "value": 0.036,
+    "source": "SSA 2027 cost-of-living adjustment, determined 2026-10-14, first payable Jan 2027: https://www.ssa.gov/oact/cola/latestCOLA.html (2026 was 2.8%). The engine applies it on the as_of anniversary, not in January.",
+    "as_of": "2026-10-14"
+  },
+  "rent_renewal_bump": {
+    "value": 0.028,
+    "source": "BLS CPI rent of primary residence, U.S. city average, 12 months ending Sep 2026: https://www.bls.gov/charts/consumer-price-index/consumer-price-index-by-category.htm. National figure; regional releases were higher (Midwest 4.1%), so check before publishing.",
+    "as_of": "2026-09-30"
+  },
+  "forecast_paths": {
+    "value": 1000,
+    "source": "Design choice: Monte Carlo paths per forecast; a 24-month run takes well under 100ms at this size.",
+    "as_of": "2026-11-07"
+  }
+}

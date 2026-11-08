@@ -1,0 +1,38 @@
+{
+  "nominal": 0.8,
+  "anchors_days": [
+    30,
+    90,
+    180
+  ],
+  "daily_factors": [
+    8.16450617738508,
+    2.2337177313672094,
+    2.0283555564265585
+  ],
+  "month_end_factors": [
+    2.07375355652557,
+    1.5720269378210685,
+    1.7616914785835414
+  ],
+  "customers": 98,
+  "left_out": [
+    "C019",
+    "C082"
+  ],
+  "held_out": {
+    "held_out_month_end": 0.8214285714285714,
+    "held_out_all_days": 0.8395629991126885,
+    "uncalibrated_month_end": 0.5952380952380952,
+    "uncalibrated_all_days": 0.4270740905057675
+  },
+  "options": {
+    "total_spend": true,
+    "uncertainty": true,
+    "recurring_noise": true,
+    "seasonal_uncertainty": true,
+    "sweeps": true,
+    "calibrate": true
+  },
+  "note": "p10-p90 bands scaled using backtest errors across 98 customers (monthly chart x2.1 / x1.6 / x1.8 at 30 / 90 / 180 days); on held-out customers the monthly band contained the actual outcome 82% of the time (was 60%), and the daily band 84% of days (was 43%)"
+}

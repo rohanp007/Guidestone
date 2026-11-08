@@ -6,3 +6,8 @@ pydantic
 
 # data / scripts
 pyarrow
+pandas
+
+# tests
+pytest
+httpx
