@@ -332,6 +332,7 @@ export interface components {
             as_of: string;
             /** Data Hash */
             data_hash: string;
+            llm: components["schemas"]["LLMHealth"];
         };
         /** Holding */
         Holding: {
@@ -343,6 +344,13 @@ export interface components {
             weight: number;
             /** Market Value */
             market_value: number;
+        };
+        /** LLMHealth */
+        LLMHealth: {
+            /** Reachable */
+            reachable: boolean;
+            /** Models Ready */
+            models_ready: boolean;
         };
         /** LoginRequest */
         LoginRequest: {
@@ -971,6 +979,10 @@ export interface components {
             daily: components["schemas"]["PercentileBands"] | null;
             /** Monthly */
             monthly: components["schemas"]["MonthEndPoint"][] | null;
+            /** @default null */
+            end_balance?: components["schemas"]["MonthEndPoint"] | null;
+            /** @default null */
+            balance_12m?: components["schemas"]["MonthEndPoint"] | null;
             low_point: components["schemas"]["LowPoint"];
             overdraft_risk: components["schemas"]["Shortfall"];
             cushion_risk: components["schemas"]["Shortfall"];
