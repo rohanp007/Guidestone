@@ -147,7 +147,7 @@ class Baseline:
 
 def _run(profile: Profile, base: "Baseline", changes: list[fc.Flow]) -> LiquidForecast:
     sim = fc._simulate(profile, base.horizon_months, base.paths, base.cushion, base.seed, base.A, changes or None, base.risk_factors)
-    return fc._summarize(profile, sim, base.horizon_months, base.A_all)
+    return fc._summarize(profile, sim, base.horizon_months, base.A_all, daily_days=base.horizon_months * 31)       # daily bands for every day
 
 
 def make_baseline(profile: Profile, days: int = 180, paths: int | None = None, seed: int = 0) -> Baseline:
@@ -162,10 +162,23 @@ def make_baseline(profile: Profile, days: int = 180, paths: int | None = None, s
     return base
 
 
+def month_min_p10(lf: LiquidForecast) -> list[float]:
+    """For each forecast month, the lowest DAILY p10 balance in it (the pessimistic band on its worst day), not the balance on the last day.
+    Paydays often fall on the last business day, so month-end points sit just after income arrives and hide the dip before it. The month
+    runs from the day after the previous month-end (or today) to its own month-end. A month the daily band does not reach falls back to
+    its month-end p10."""
+    daily, out, prev = (lf.daily.p10 if lf.daily else []), [], lf.as_of_date
+    for m in lf.monthly or []:
+        lo, hi = (prev - lf.as_of_date).days + 1, min((m.day - lf.as_of_date).days, len(daily) - 1)
+        out.append(min(daily[lo:hi + 1]) if daily and lo <= hi else m.p10)
+        prev = m.day
+    return out
+
+
 def summarize(lf: LiquidForecast, cushion: float) -> SimSummary:
-    months = lf.monthly or []
-    return SimSummary(end_p50=months[-1].p50, min_p10=min(m.p10 for m in months), overdraft_prob=lf.overdraft_risk.probability,
-                      cushion_prob=lf.cushion_risk.probability, months_p10_below_cushion=sum(m.p10 < cushion for m in months))
+    months, lows = lf.monthly or [], month_min_p10(lf)
+    return SimSummary(end_p50=months[-1].p50, min_p10=min(lows), overdraft_prob=lf.overdraft_risk.probability,
+                      cushion_prob=lf.cushion_risk.probability, months_p10_below_cushion=sum(low < cushion for low in lows))
 
 
 def diff(a: SimSummary, b: SimSummary) -> SimDiff:

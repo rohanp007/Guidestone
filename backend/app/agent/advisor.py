@@ -66,8 +66,9 @@ def response_schema(inp: "Inputs") -> dict:
 
 
 ADVISOR_PROMPT = (
-    "You are a careful financial coach. The app has already chosen the customer's first move. You write one plain sentence saying why "
-    "it fits this customer, and you may add up to 2 more moves from the others, most important first, each with one sentence.\n"
+    "You are a careful financial coach. The app has already chosen the customer's first move. You write a plain sentence saying why "
+    "it fits this customer (two sentences if its example has two: keep both), and you may add up to 2 more moves from the others, most "
+    "important first, each with exactly one sentence.\n"
     "Rules:\n"
     "- move_code must be copied exactly from the list of other moves. Choose only from that list.\n"
     "- Each move has an example sentence. Adapt it: keep its {placeholders} written in braces exactly, because the app fills in the "
@@ -142,7 +143,8 @@ SPECS: dict[str, Spec] = {
         "Build a starter cushion",
         "You have {starter_cushion_now} in cash against a starter fund of {starter_cushion_target}; adding {starter_cushion_gap} gets you there.",
         ((lambda f: f["liquid"] < ZERO, "You have no cash set aside yet; building a starter fund of {starter_cushion_target} is the first goal."),
-         (lambda f: "months_to_target" in f, "You have {starter_cushion_now} in cash against a starter fund of {starter_cushion_target}; adding {starter_cushion_gap} gets you there in about {starter_target_months} if all your monthly surplus goes to it."))),
+         (lambda f: "retirement_saving_monthly" in f, "You have {starter_cushion_now} in cash against a starter fund of {starter_cushion_target}; adding {starter_cushion_gap} would take about {starter_target_months}, since about {cash_build_monthly} a month builds up in cash after your {retirement_saving_monthly} a month of retirement saving."),
+         (lambda f: "months_to_target" in f, "You have {starter_cushion_now} in cash against a starter fund of {starter_cushion_target}; adding {starter_cushion_gap} would take about {starter_target_months} at the {cash_build_monthly} a month that builds up in cash."))),
     "confirm_401k_match": Spec(
         "The customer's employer offers a 401(k) match, and we cannot see whether they get all of it.",
         (P("match_pct", lambda f: f["employer_match_pct"], pct, "share of pay the employer matches"),
@@ -173,7 +175,8 @@ SPECS: dict[str, Spec] = {
         "Build your full emergency cushion",
         "You have {cushion_now} in cash against a full cushion of {cushion_target} ({cushion_months} of essentials), so {cushion_gap} more is needed.",
         ((lambda f: f["liquid"] < ZERO, "You have no cash set aside yet; a full cushion of {cushion_target} ({cushion_months} of essentials) is the goal."),
-         (lambda f: "months_to_target" in f, "You have {cushion_now} in cash against a full cushion of {cushion_target} ({cushion_months} of essentials); {cushion_gap} more would take about {cushion_target_months} if all your monthly surplus goes to it.")),
+         (lambda f: "retirement_saving_monthly" in f, "You have {cushion_now} in cash against a full cushion of {cushion_target} ({cushion_months} of essentials); {cushion_gap} more would take about {cushion_target_months}, since about {cash_build_monthly} a month builds up in cash after your {retirement_saving_monthly} a month of retirement saving."),
+         (lambda f: "months_to_target" in f, "You have {cushion_now} in cash against a full cushion of {cushion_target} ({cushion_months} of essentials); {cushion_gap} more would take about {cushion_target_months} at the {cash_build_monthly} a month that builds up in cash.")),
         lambda f: ("Once {once}, start building a full cushion of {cushion_target} ({cushion_months} of essentials)." if f["liquid"] < ZERO else
                    "Once {once}, build your cash from {cushion_now} up to a full cushion of {cushion_target} ({cushion_months} of essentials).")),
     "increase_retirement": Spec(
@@ -249,6 +252,10 @@ OPTIONAL: tuple[tuple[tuple[str, ...] | None, Callable[[dict], bool], P], ...] =
      P("cushion_target_months", lambda f: f["months_to_target"], months, "how long the gap takes if all the monthly surplus goes to it, with the unit")),
     (("build_starter_cushion",), lambda f: "months_to_target" in f,
      P("starter_target_months", lambda f: f["months_to_target"], months, "how long the gap takes if all the monthly surplus goes to it, with the unit")),
+    (("build_full_cushion", "build_starter_cushion"), lambda f: "cash_build_monthly" in f,
+     P("cash_build_monthly", lambda f: f["cash_build_monthly"], usd, "the cash that really builds up each month, after retirement saving")),
+    (("build_full_cushion", "build_starter_cushion"), lambda f: "retirement_saving_monthly" in f,
+     P("retirement_saving_monthly", lambda f: f["retirement_saving_monthly"], usd, "what already goes to a retirement account each month")),
     (None, lambda f: "freed_amount" in f, P("freed_amount", lambda f: f["freed_amount"], usd, "the monthly payment that frees up when a loan payment ends")),
     (None, lambda f: "freed_amount" in f, P("freed_date", lambda f: f["freed_date"], day, "the date that loan payment ended or ends")),
 )
@@ -284,10 +291,20 @@ def sentence(code: str, facts: dict) -> str:
         text = spec.later(facts).replace("{once}", ONCE[facts["after_step"]])
     else:
         text = next((t for when, t in spec.variants if when(facts)), None) or (spec.why(facts) if callable(spec.why) else spec.why)
-    if "freed_amount" in facts:                                          # a freed payment folded into the pinned move
-        verb = "ended on" if facts.get("freed_state") == "ended" else "ends on"
-        text = text.rstrip(".") + f"; the {{freed_amount}} a month that frees up when a loan payment {verb} {{freed_date}} can go straight to it."
+    if "freed_amount" in facts:                                          # a freed payment folded into the pinned move: its own, second sentence
+        text = text.rstrip(".") + ". " + freed_sentence(code, facts)
     return text
+
+
+def freed_sentence(code: str, facts: dict) -> str:
+    """The second sentence of the pinned move when a loan payment has freed up (or is about to). A loan that ended BEFORE today is already
+    in the surplus: the sentence says the money includes it. One that ends later is not yet: the sentence says what happens then."""
+    cushion = code in ("build_full_cushion", "build_starter_cushion")
+    if facts.get("freed_state") == "ended":
+        return ("That includes the {freed_amount} a month freed up when your loan ended on {freed_date}." if cushion else
+                "The extra money you have includes the {freed_amount} a month freed up when your loan ended on {freed_date}.")
+    return ("When your loan payment ends on {freed_date}, the {freed_amount} a month it frees up can go straight to it." if cushion else
+            "When your loan is paid off on {freed_date}, its {freed_amount} a month is free for your next goal.")
 
 
 def template_move(code: str, facts: dict) -> tuple[str, str]:
@@ -335,7 +352,7 @@ def _fold_freed_payment(inp: Inputs) -> None:
         return
     inp.candidates[pinned] = inp.candidates[pinned].model_copy(update={"facts": {
         **inp.candidates[pinned].facts, "freed_amount": round(sum(e["monthly_amount"] for e in known), 2),
-        "freed_date": known[0]["ends"], "freed_state": known[0]["state"]}})
+        "freed_date": known[0]["ends"], "freed_state": known[0]["state"], "freed_in_surplus": known[0]["state"] == "ended"}})
     del inp.candidates["recently_freed_payment"]
     inp.folded.append("recently_freed_payment")
 
@@ -399,7 +416,11 @@ def _fill_all(inp: Inputs) -> dict[str, str]:
     return out
 
 
-def check_move(m: AdvisorMove, inp: Inputs) -> Checked:
+def sentence_count(text: str) -> int:
+    return len([s for s in re.split(r"(?<=[.!?])\s+(?=[A-Z])", text.strip()) if s])
+
+
+def check_move(m: AdvisorMove, inp: Inputs, pinned: bool = False) -> Checked:
     """Fill the placeholders, then check the words against ONLY this move's own facts (a figure from another move is not allowed)."""
     move = inp.candidates[m.move_code]
     mt = move_text(m.move_code, move.facts)
@@ -411,7 +432,9 @@ def check_move(m: AdvisorMove, inp: Inputs) -> Checked:
     missing = [reason for reason, ok in (
         ("missing_once", "after_step" not in move.facts or bool(re.search(r"\bonce\b", filled.why_text, re.I))),
         ("missing_secured_card", not move.facts.get("secured_card") or "secured card" in filled.why_text.lower()),
-        ("freed_not_mentioned", "freed_amount" not in move.facts or "{freed_amount}" in m.why_text)) if not ok]
+        ("freed_not_mentioned", "freed_amount" not in move.facts or "{freed_amount}" in m.why_text),
+        # one sentence per move; the pinned move may use two (the gap and its timeline, then the freed payment)
+        ("too_long", sentence_count(filled.why_text) <= (2 if pinned else 1))) if not ok]
     return Checked(filled, report, unused, bool(ZERO_FIGURE.search(filled.why_text)), missing)
 
 
@@ -461,7 +484,7 @@ def _screen(answer: AdvisorAnswer, inp: Inputs) -> tuple[list[Checked], list[str
     seen = {pinned}
     if pinned:
         if (answer.pinned_why or "").strip():
-            good.append(check_move(AdvisorMove(move_code=pinned, why_text=answer.pinned_why), inp))
+            good.append(check_move(AdvisorMove(move_code=pinned, why_text=answer.pinned_why), inp, pinned=True))
         else:
             missing.append(pinned)
     for m in answer.more:

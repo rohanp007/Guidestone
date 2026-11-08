@@ -2,6 +2,7 @@
 synthetic profiles. Thresholds are read from assumptions.json, as the formulas do."""
 from __future__ import annotations
 
+import math
 from datetime import date
 
 import pytest
@@ -410,3 +411,95 @@ def test_verdict_rules():
     done = make([checking(7000.0)], surplus=500.0, retirement=RetirementInfo(has_401k=True, employer_match_pct=0.5))
     assert rules.priority_waterfall(done).first_open_step in (7, None)                # nothing earlier is open
     assert rules.verdict(done, "on_track") == "on_track" and rules.verdict(done, "watch") == "plan_ahead"
+
+
+# ---- cash that actually builds up ---------------------------------------------------------------------------------------------------
+
+def test_cash_build_is_the_surplus_less_retirement_transfers():
+    plain = rules.candidate_moves(make([checking(200.0)], surplus=500.0))
+    f = next(m for m in plain.moves if m.move_code == "build_starter_cushion").facts
+    assert f["cash_build_monthly"] == 500.0 and f["surplus_after"] == [] and "retirement_saving_monthly" not in f
+    ira = make([checking(200.0)], surplus=500.0, extra_recurring=[recurring("investment_transfer", -300.0)])
+    f = next(m for m in rules.candidate_moves(ira).moves if m.move_code == "build_starter_cushion").facts
+    assert f["cash_build_monthly"] == 200.0 and f["retirement_saving_monthly"] == 300.0 and f["months_to_target"] == math.ceil(f["months_to_target"])
+    assert f["months_to_target"] == math.ceil(800.0 / 200.0)                                  # a $1,000 starter fund, $200 in cash, $200 a month
+    all_ira = make([checking(200.0)], surplus=300.0, extra_recurring=[recurring("investment_transfer", -300.0)])
+    f = next(m for m in rules.candidate_moves(all_ira).moves if m.move_code == "build_starter_cushion").facts
+    assert "months_to_target" not in f                                                         # nothing builds up in cash
+
+
+def test_the_cushion_and_the_forecast_count_the_same_cash(real):
+    for pid in list(real)[:30]:
+        p = real[pid]
+        f = fc.forecast_liquid(p, horizon_months=1, paths=100, with_backtest=False)
+        assert rules._liquid(p) == pytest.approx(f.start_liquid), pid                        # checking + savings, both
+
+
+def test_C002_surplus_reconciles_with_the_forecast_to_the_dollar(real):
+    """Surplus 875.36 = income 3,637.00 - bills 1,478.15 - variable spending 1,283.50. The forecast also pays the $300 IRA transfer,
+    spends a seasonal / inflated 1,296.2 on variable costs (12.7 more), bills 0.85 higher, and earns 2.0 interest."""
+    p = real["C002"]
+    s = p.summary
+    bills = -sum(r.monthly_amount for r in p.recurring if r.kind in ("housing", "utility", "insurance", "subscription"))
+    assert s.monthly_surplus == pytest.approx(s.net_monthly_income - bills - sum(p.variable_spend.values()), abs=0.01)
+    assert s.monthly_debt_payments == 0                                                        # the $545 loan ended before as_of: already in the surplus
+    f = fc.forecast_liquid(p, horizon_months=6, paths=200, with_backtest=False)
+    month1 = sum(f.drivers.values())
+    assert month1 == pytest.approx(s.monthly_surplus - 300 - 12.7 - 0.85 + 2.0, abs=1.0)
+    assert f.drivers["investment_transfer"] == -300.0
+    growth = (f.monthly[5].p50 - f.start_liquid) / 6
+    assert 540 < growth < 600 and growth == pytest.approx(s.monthly_surplus - 300, abs=15)
+
+
+def test_C002s_late_january_jump_is_a_payday(real):
+    from datetime import date
+    p = real["C002"]
+    A = {k: v["value"] for k, v in assumptions().items()}
+    sch = fc.build_schedule(p, 6, A, None)
+    pay = [(d, a) for d, k, a, _, _ in sch.cash if k == "income" and date(2027, 1, 25) <= d <= date(2027, 2, 5)]
+    assert pay == [(date(2027, 1, 29), pytest.approx(1818.5))]                               # semimonthly: 15th and the last business day
+    assert not [e for e in sch.events if date(2027, 1, 25) <= e.day <= date(2027, 2, 5)]      # no extra-paycheck or other event
+
+
+# ---- free surplus: retirement transfers are not allocated twice ----------------------------------------------------------------------
+
+def ira(monthly):
+    return [recurring("investment_transfer", -monthly)]
+
+
+def test_the_waterfall_allocates_the_free_surplus_and_counts_transfers_as_step_5_progress():
+    p = make([checking(7000.0)], surplus=875.0, extra_recurring=ira(300.0))          # steps 1-4 done (3 x 2,000 = 6,000)
+    wf = rules.priority_waterfall(p)
+    assert (wf.surplus, wf.retirement_transfers, wf.free_surplus) == (875.0, 300.0, 575.0)
+    s5 = step(wf, 5)
+    assert s5.current == 300.0 and s5.status == "in_progress" and s5.detail["ira_monthly"] == 300.0         # the transfer still counts as progress
+    assert s5.monthly_suggested == pytest.approx(min(575.0, s5.gap)) and sum(s.monthly_suggested for s in wf.steps) + wf.unallocated == 575.0
+    low = make([checking(1500.0)], surplus=875.0, extra_recurring=ira(300.0))        # step 4 open, gap 4,500: it takes the whole free surplus
+    wf = rules.priority_waterfall(low)
+    assert wf.current_step == 4 and step(wf, 4).monthly_suggested == 575.0 and step(wf, 5).monthly_suggested == 0
+    none = rules.priority_waterfall(make([checking(1500.0)], surplus=875.0))
+    assert step(none, 4).monthly_suggested == 875.0 and none.free_surplus == 875.0 and none.retirement_transfers == 0
+
+
+def test_transfers_larger_than_the_surplus_leave_nothing_to_allocate():
+    p = make([checking(1500.0)], surplus=200.0, extra_recurring=ira(300.0))
+    wf = rules.priority_waterfall(p)
+    assert wf.free_surplus == 0 and all(s.monthly_suggested == 0 for s in wf.steps) and wf.unallocated == 0
+    assert wf.current_step == 4                                                      # a positive surplus: not the "gap" state
+    f = next(m for m in rules.candidate_moves(p).moves if m.move_code == "build_full_cushion").facts
+    assert "months_to_target" not in f
+    assert "no_surplus" in rules.payoff_priority(p).flags
+
+
+def test_payoff_extra_defaults_to_the_free_surplus():
+    p = make([checking(5000.0), card("CARD", 5000, 0.25)], surplus=800.0, extra_recurring=ira(300.0))
+    out = rules.payoff_priority(p)
+    assert out.extra_monthly_applied == 500.0 and "no_surplus" not in out.flags
+    assert rules.payoff_priority(p, extra_monthly=0).extra_monthly_applied == 0
+    assert rules.payoff_priority(p, extra_monthly=700).extra_monthly_applied == 700           # the caller's own number is used as given
+
+
+def test_C002_allocates_575_to_the_cushion(real):
+    wf = rules.priority_waterfall(real["C002"])
+    assert (wf.surplus, wf.retirement_transfers, wf.free_surplus) == (875.36, 300.0, 575.36)
+    assert step(wf, 4).monthly_suggested == 575.36 and step(wf, 5).current == 300.0 and step(wf, 5).monthly_suggested == 0

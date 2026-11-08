@@ -320,7 +320,7 @@ def test_retirement_comes_before_education(inputs, monkeypatch):
 
 
 def test_with_nothing_pinned_the_model_picks_up_to_three(inputs, monkeypatch):
-    inp, facts = inputs["C002"]
+    inp, facts = inputs["C067"]
     flat = advisor.Inputs(inp.waterfall, inp.moves, inp.verdict,
                           {c: m.model_copy(update={'addresses_current_step': False}) for c, m in inp.candidates.items()}, inp.labels)
     assert advisor.pinned_code(flat) is None
@@ -663,16 +663,21 @@ def test_the_current_step_move_gets_months_to_target(inputs, monkeypatch):
     import math
     inp, facts = inputs["C002"]
     wf = inp.waterfall
-    gap, alloc = wf.steps[3].gap, wf.steps[3].monthly_suggested
+    gap, surplus = wf.steps[3].gap, wf.surplus
     cushion = inp.candidates["build_full_cushion"].facts
-    assert cushion["months_to_target"] == math.ceil(gap / alloc) == 11
+    # the surplus is before the $300 a month that goes to the IRA, so the cash that builds up is $575, not $875
+    assert cushion["surplus_monthly"] == 875.36 and cushion["retirement_saving_monthly"] == 300.0 and cushion["cash_build_monthly"] == 575.36
+    assert cushion["surplus_after"] == [{"kind": "retirement_saving", "monthly": 300.0}]
+    assert cushion["months_to_target"] == math.ceil(gap / 575.36) == 17 != math.ceil(gap / surplus)
     text = advisor.template_move("build_full_cushion", cushion)[1]
-    assert "about 11 months if all your monthly surplus goes to it" in text
+    assert "would take about 17 months, since about $575 a month builds up in cash after your $300 a month of retirement saving" in text
     mt = advisor.move_text("build_full_cushion", cushion)
-    assert mt.ph["cushion_target_months"] == "11 months" and mt.values["cushion_target_months"] == 11
+    assert mt.ph["cushion_target_months"] == "17 months" and mt.values["cushion_target_months"] == 17
+    assert mt.values["cash_build_monthly"] == 575.36 and mt.values["retirement_saving_monthly"] == 300.0
     # the later moves do not get one; step 3's is a floor (no interest) and is not worded
     assert "months_to_target" not in inp.candidates["increase_retirement"].facts
-    assert inputs["C067"][0].candidates["pay_card_high_apr"].facts["months_to_target"] == math.ceil(14500 / 755.67)
+    card = inputs["C067"][0].candidates["pay_card_high_apr"].facts                  # no retirement transfers: the whole surplus builds up
+    assert card["months_to_target"] == math.ceil(14500 / 755.67) and "retirement_saving_monthly" not in card and card["surplus_after"] == []
     assert "1 month" == advisor.months(1) and "2 months" == advisor.months(2)
 
 
@@ -693,14 +698,21 @@ def test_a_freed_payment_is_folded_into_the_pinned_move_on_step_3_or_4(cid, amou
     pf = inp.candidates[pinned].facts
     assert pf["freed_amount"] == amount and pf["freed_state"] == state and pf["freed_date"]
     text = advisor.template_move(pinned, pf)[1]
-    assert f"${amount:,.0f} a month that frees up when a loan payment {'ended' if state == 'ended' else 'ends'} on " in text
+    first, second = text.split(". ", 1)                                                               # two sentences: the gap, then the freed payment
+    assert advisor.sentence_count(text) == 2 and "{" not in text and f"${amount:,.0f}" not in first
+    if state == "ended":      # before today: already in the surplus, so the sentence says the cash build INCLUDES it
+        assert second.startswith(f"That includes the ${amount:,.0f} a month freed up when your loan ended on ") and "Oct 24, 2026" in second
+        assert "about 17 months" in first and pf["freed_in_surplus"] is True
+    else:                     # after today: not in the surplus yet, so the sentence says what happens when it is paid off
+        assert second == f"When your loan is paid off on Jan 14, 2027, its ${amount:,.0f} a month is free for your next goal."
+        assert pf["freed_in_surplus"] is False
     assert advisor.move_text(pinned, pf).values["freed_amount"] == amount
     advice = run(inp, facts, Model(examples), monkeypatch)
     assert advice.source == "model" and "recently_freed_payment" not in {m.move_code for m in advice.moves}
     assert f"${amount:,.0f} a month" in advice.moves[0].why_text and advice.diagnostics.first_try_ok
     assert_grounded(advice, inp)
     # the model must mention it: leaving it out is rejected
-    leave = ans(example_of(inp, pinned).split(";")[0] + ".")
+    leave = ans(example_of(inp, pinned).split(". ")[0] + ".")
     model = Model(leave)
     r2 = run(inp, facts, model, monkeypatch)
     assert "freed_not_mentioned" in r2.diagnostics.first_reasons and r2.moves[0].source == "template" and f"${amount:,.0f}" in r2.moves[0].why_text
@@ -748,3 +760,44 @@ def test_start_credit_building_says_secured_card_below_the_threshold(inputs, pro
     monkeypatch.setattr(rules, "thresholds", lambda: {**{k: v["value"] for k, v in assumptions().items()}, "secured_card_score_max": 500})
     assert rules.candidate_moves(profiles["C002"]).moves and next(
         m for m in rules.candidate_moves(profiles["C002"]).moves if m.move_code == "start_credit_building").facts["secured_card"] is False
+
+
+# ---- the pinned move may use two sentences; every other move one ------------------------------------------------------------------
+
+def test_the_pinned_move_may_use_two_sentences_and_others_only_one(inputs, monkeypatch):
+    inp, facts = inputs["C002"]                                            # pinned: build_full_cushion with a freed payment (two sentences)
+    two = example_of(inp, "build_full_cushion")
+    assert advisor.sentence_count(two) == 2
+    ok = run(inp, facts, Model(ans(two, ("automate_savings", example_of(inp, "automate_savings")))), monkeypatch)
+    assert ok.diagnostics.first_try_ok and ok.moves[0].source == "model" and advisor.sentence_count(ok.moves[0].why_text) == 2
+    three = two + " Do it soon."
+    r = run(inp, facts, Model(ans(three)), monkeypatch)
+    assert "too_long" in r.diagnostics.first_reasons and r.moves[0].source == "template" and advisor.sentence_count(r.moves[0].why_text) == 2
+    other_two = example_of(inp, "automate_savings") + " It takes a minute."
+    r2 = run(inp, facts, Model(ans(two, ("automate_savings", other_two))), monkeypatch)
+    assert "too_long" in r2.diagnostics.first_reasons
+    assert [m for m in r2.moves if m.move_code == "automate_savings"][0].source == "template"
+    assert "two sentences" in advisor.ADVISOR_PROMPT and "exactly one sentence" in advisor.ADVISOR_PROMPT
+
+
+def test_sentence_count_ignores_dates_and_numbers():
+    assert advisor.sentence_count("You have $3,718 in cash (6 months of essentials); on Oct 24, 2026, it is 14.0% a year.") == 1
+    assert advisor.sentence_count("One. Two.") == 2 and advisor.sentence_count("") == 0
+
+
+def test_C002s_875_already_includes_the_545_that_freed_up_when_the_loan_ended(inputs, profiles):
+    p = profiles["C002"]
+    freed = inputs["C002"][0].moves.moves
+    amount = next(m for m in freed if m.move_code == "recently_freed_payment").facts["freed"][0]["monthly_amount"]
+    assert amount == 544.61 and p.summary.monthly_debt_payments == 0                  # no debt payment left in the surplus
+    loan = next(a for a in p.accounts if a.id == "A-C002-PERSONAL_LOAN")
+    assert loan.maturity_date < p.as_of_date and loan.balance == 0 and loan.min_payment == 0
+    assert p.summary.monthly_surplus == pytest.approx(875.36, abs=0.01)
+    assert p.summary.monthly_surplus - amount == pytest.approx(330.75, abs=0.01)       # what it would be had the loan still been running
+    pf = inputs["C002"][0].candidates["build_full_cushion"].facts
+    assert pf["freed_in_surplus"] is True and pf["freed_state"] == "ended"
+    # a loan that has not ended yet is NOT in the surplus: C059's $610 is still being paid
+    p59 = profiles["C059"]
+    loan59 = next(a for a in p59.accounts if a.id == "A-C059-AUTO_LOAN")
+    assert loan59.maturity_date > p59.as_of_date and loan59.min_payment == 610.17 and p59.summary.monthly_debt_payments >= 610.17
+    assert inputs["C059"][0].candidates["pay_loan_high_apr"].facts["freed_in_surplus"] is False

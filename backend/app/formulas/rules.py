@@ -46,6 +46,14 @@ def _liquid(profile: Profile) -> float:
     return float(sum(a.balance for a in profile.accounts if a.is_liquid))
 
 
+def free_surplus(profile: Profile) -> float:
+    """The monthly surplus that is still free to allocate: the surplus less what already leaves cash for retirement accounts each month
+    (the IRA transfer). The surplus is income less spending and debt payments and does not include that transfer, so without this the
+    same dollars would be counted twice: once as retirement saving already under way (step 5's progress) and again as money to spend
+    on the cushion. Never below 0."""
+    return max(0.0, _surplus(profile) - _ira_monthly(profile))
+
+
 def _surplus(profile: Profile) -> float:
     if profile.summary is None:
         raise ValueError(f"{profile.id}: needs derive.enrich() and a summary first")
@@ -87,11 +95,13 @@ class WaterfallStep(Base):
 
 class Waterfall(Base):
     profile_id: str
-    surplus: float
+    surplus: float                           # income - spending - debt payments (docs/rules.md "Surplus")
+    retirement_transfers: float              # what already leaves cash for retirement accounts each month; it counts as step 5 progress
+    free_surplus: float                      # surplus - retirement_transfers (never below 0): what the steps below share out
     current_step: int | Literal["gap"] | None  # the first step still to do; "gap" when spending exceeds income; None when nothing is left to do
     first_open_step: int | None              # the first step still to do, ignoring "gap" (what current_step would be with a surplus)
     steps: list[WaterfallStep]
-    unallocated: float                       # surplus left after every step that could take some
+    unallocated: float                       # free surplus left after every step that could take some
 
 
 def _ira_monthly(profile: Profile) -> float:
@@ -174,7 +184,9 @@ def priority_waterfall(profile: Profile) -> Waterfall:
         float(sum(a.balance for a in moderate)) if moderate else None, None, "optional", accounts=[a.id for a in moderate])
 
     # hand out the surplus: first step not done, remainder to the next
-    remaining = max(surplus, 0.0)
+    transfers = _ira_monthly(profile)
+    free = free_surplus(profile)
+    remaining = free
     current_step = None
     for s in steps:
         eligible = s.status in ("todo", "in_progress") and s.detail.get("active", True)
@@ -189,7 +201,8 @@ def priority_waterfall(profile: Profile) -> Waterfall:
         s7.status, s7.monthly_suggested = "todo", _r(remaining)
         s7.detail["kind"] = "extra_investing"
         current_step, remaining = current_step or 7, 0.0
-    return Waterfall(profile_id=profile.id, surplus=_r(surplus), current_step="gap" if surplus < 0 else current_step,
+    return Waterfall(profile_id=profile.id, surplus=_r(surplus), retirement_transfers=_r(transfers), free_surplus=_r(free),
+                     current_step="gap" if surplus < 0 else current_step,
                      first_open_step=current_step, steps=steps, unallocated=_r(remaining))
 
 
@@ -301,7 +314,7 @@ def payoff_priority(profile: Profile, *, lump_sum: float = 0.0, extra_monthly: f
     all_debts = [a for a in profile.accounts if is_debt(a)]
     if not all_debts:
         flags.append("no_debt")
-    if surplus <= 0:
+    if free_surplus(profile) <= 0:                                 # nothing free to put toward debt (spending, or retirement transfers, take it all)
         flags.append("no_surplus")
     if any(a.rate < T["safe_savings_rate"] for a in all_debts):
         flags.append("keep_cash_earns_more")
@@ -311,7 +324,7 @@ def payoff_priority(profile: Profile, *, lump_sum: float = 0.0, extra_monthly: f
     if all_debts:
         flags.append("prepayment_penalty_assumed_none")
 
-    extra = max(surplus, 0.0) if extra_monthly is None else extra_monthly
+    extra = free_surplus(profile) if extra_monthly is None else extra_monthly
     avalanche = snowball = cost = cd = None
     if chosen:
         months, interest = simulate(chosen, chosen, applied_lump, extra)
@@ -432,16 +445,24 @@ def candidate_moves(profile: Profile) -> CandidateMoves:
     if surplus > 0 and saved < T["automate_coverage_min"] * surplus:
         add("automate_savings", OPPORTUNITY, surplus=_r(surplus), automated_monthly=_r(max(saved, 0.0)), coverage=round(max(saved, 0.0) / surplus, 2))
     moves.sort(key=lambda m: m.priority)                          # stable: ties keep the order above
-    _sequence_facts(moves, wf)
+    _sequence_facts(moves, wf, profile)
     return CandidateMoves(profile_id=profile.id, current_step=wf.current_step, moves=moves)
 
 
-def _sequence_facts(moves: list[CandidateMove], wf: Waterfall) -> None:
+def surplus_after(profile: Profile) -> list[dict]:
+    """What the surplus is after, for wording: the retirement transfers that leave cash each month (they are why the cash balance grows by
+    less than the surplus; see free_surplus). Cash is checking + savings in the cushion, the waterfall and the forecast alike."""
+    return [{"kind": "retirement_saving", "monthly": _r(ira)}] if (ira := _ira_monthly(profile)) > 0 else []
+
+
+def _sequence_facts(moves: list[CandidateMove], wf: Waterfall, profile: Profile) -> None:
     """Where each waterfall move sits relative to the current step, as facts the advisor words ("Once your cushion is full, ...").
     after_step / after_step_name: a move for a LATER step (or any step move while spending exceeds income: current step "gap").
-    months_to_target: for the current step's move, how many months its gap takes if the whole allocated surplus goes to it
-    (rounded up; for step 3 it ignores interest, so it is a floor)."""
+    months_to_target: for the current step's move, how many months its gap takes at the allocation (a share of the free surplus: what is
+    left after retirement transfers, i.e. the cash that really builds up; rounded up; for step 3 it ignores interest, so a floor). The same
+    move also gets what the surplus is after: surplus_monthly, cash_build_monthly, retirement_saving_monthly."""
     cur, steps = wf.current_step, {s.step: s for s in wf.steps}
+    after = surplus_after(profile)
     for m in moves:
         if cur is None or not 1 <= m.priority <= 7:
             continue
@@ -450,8 +471,14 @@ def _sequence_facts(moves: list[CandidateMove], wf: Waterfall) -> None:
             m.facts["after_step_name"] = "monthly gap" if cur == "gap" else steps[cur].name
         elif m.priority == cur and cur in (1, 3, 4):
             s = steps[cur]
-            if s.gap and s.monthly_suggested > 0:
-                m.facts["months_to_target"] = math.ceil(s.gap / s.monthly_suggested)
+            rate = s.monthly_suggested                                    # already a share of the free surplus
+            if s.gap and rate > 0:
+                m.facts["months_to_target"] = math.ceil(s.gap / rate)
+                m.facts["surplus_monthly"] = _r(wf.surplus)
+                m.facts["cash_build_monthly"] = _r(rate)
+                m.facts["surplus_after"] = after
+                if after:
+                    m.facts["retirement_saving_monthly"] = after[0]["monthly"]
 
 
 def _ended_payment_near(profile: Profile, day) -> float | None:

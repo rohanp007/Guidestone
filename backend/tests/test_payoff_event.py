@@ -111,7 +111,7 @@ def test_C067_with_the_model_off_the_template_still_states_the_tradeoff(profiles
     r = go(profiles["C067"], Model(LLMUnavailable("down")))
     a = r.payoff.answer
     assert a.source == "template" and a.diagnostics.first_reasons == ["llm_unavailable"] and r.degraded
-    assert "debt-free in 6 months" in a.text and "$8,077" in a.text and "$10,511 cushion" in a.text and "4 months" in a.text
+    assert "debt-free in 6 months" in a.text and "$5,771" in a.text and "$10,511 cushion" in a.text and "6 months" in a.text
     assert r.payoff.verdict == "pay_with_tradeoff" and r.payoff.simulation is not None
     assert orchestrator.is_transient(r)                                                                          # a stand-in for the model: short TTL
 

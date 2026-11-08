@@ -268,7 +268,7 @@ export interface paths {
         };
         /**
          * My Forecast
-         * @description 180-day liquid-cash forecast: daily bands for the first 90 days, month-end points after that.
+         * @description 180-day liquid-cash forecast with a daily band for every day of the horizon.
          */
         get: operations["my_forecast_api_me_forecast_get"];
         put?: never;
@@ -1623,6 +1623,10 @@ export interface components {
             profile_id: string;
             /** Surplus */
             surplus: number;
+            /** Retirement Transfers */
+            retirement_transfers: number;
+            /** Free Surplus */
+            free_surplus: number;
             /** Current Step */
             current_step: number | "gap" | null;
             /** First Open Step */

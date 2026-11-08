@@ -32,8 +32,9 @@ def month1_cash(p, changes=None):
 
 # ---- forecast.py: changes=None is the old forecast -------------------------------------------------------------------------------
 
-# Recorded from the forecast BEFORE the `changes` hook was added (paths=300, horizon 6, seed 0).
-GOLDEN = {"C067": (24542.552233, 20901.279805, 1890819.53804, 2), "C059": (15420.468734, 12500.180159, 961671.622452, 1)}
+# Recorded from the forecast BEFORE the `changes` hook was added (paths=300, horizon 6, seed 0). The one band value that moved since is
+# C059's month-3 p10 (12500.18 -> 12499.76): forecast.no_narrowing widened it by $0.42 so a band never narrows with the horizon.
+GOLDEN = {"C067": (24542.552233, 20901.279805, 1890819.53804, 2), "C059": (15420.468734, 12499.759470, 961671.622452, 1)}
 
 
 @pytest.mark.parametrize("pid", list(GOLDEN))
@@ -241,3 +242,52 @@ def test_simulate_payoff_and_registration(real):
     assert session_tool(real["C067"], "simulate_scenario_summary").fn(expense_change={"monthly_delta": 50}).flows == 6
     with pytest.raises(ValueError):
         session_tool(real["C067"], "simulate_scenario")
+
+
+# ---- bands never narrow with the horizon ---------------------------------------------------------------------------------------------
+
+def test_no_narrowing_keeps_the_median_and_the_shape_and_only_widens():
+    import numpy as np
+    p50 = np.array([100.0, 100, 100, 100, 100, 100])
+    p10 = np.array([100.0, 60, 20, 70, 0, 100])           # width 0, 40, 80, 30 (narrower), 100, 0 (zero width: a day with no uncertainty)
+    p90 = np.array([100.0, 120, 150, 110, 130, 100])
+    lo, hi = fc.no_narrowing(p50, p10, p90)
+    widths = hi - lo
+    assert (np.diff(widths) >= -1e-9).all() and np.allclose(widths, np.maximum.accumulate(p90 - p10))
+    assert (lo <= p10 + 1e-9).all() and (hi >= p90 - 1e-9).all()                     # only wider
+    assert np.allclose(lo[[0, 1, 2, 4]], p10[[0, 1, 2, 4]]) and np.allclose(hi[[0, 1, 2, 4]], p90[[0, 1, 2, 4]])   # untouched where already the widest
+    assert lo[5] < 100 < hi[5]                                                       # a zero-width day after a wide one is not left at zero width
+
+
+def test_every_customers_forecast_bands_widen_or_hold_with_the_horizon(real):
+    import numpy as np
+    for pid in list(real)[:40]:
+        f = fc.forecast_liquid(real[pid], horizon_months=12, paths=200, with_backtest=False)
+        daily = np.array(f.daily.p90) - np.array(f.daily.p10)
+        monthly = np.array([m.p90 - m.p10 for m in f.monthly])
+        assert (np.diff(daily) >= -1e-6).all(), pid
+        assert (np.diff(monthly) >= -1e-6).all(), pid
+
+
+# ---- the cushion measures use each month's lowest daily balance -------------------------------------------------------------------------
+
+def test_month_min_p10_is_the_lowest_daily_p10_in_each_month(real):
+    p = real["C002"]                                       # paid on the last business day: month-end points sit just after payday
+    base = sm.make_baseline(p)
+    lf = base.forecast
+    lows = sm.month_min_p10(lf)
+    assert len(lows) == len(lf.monthly) == 6 and len(lf.daily.p10) >= 180
+    prev = lf.as_of_date
+    for m, low in zip(lf.monthly, lows):
+        lo, hi = (prev - lf.as_of_date).days + 1, (m.day - lf.as_of_date).days
+        assert low == min(lf.daily.p10[lo:hi + 1]) and low <= m.p10 + 1e-9               # never above the month-end point
+        prev = m.day
+    assert any(low < m.p10 - 100 for m, low in zip(lf.monthly, lows))                    # and well below it in some month
+    s = sm.summarize(lf, base.cushion)
+    assert s.min_p10 == min(lows) and s.months_p10_below_cushion == sum(low < base.cushion for low in lows)
+    assert s.end_p50 == lf.monthly[-1].p50                                              # the end balance is still the month-end
+
+
+def test_month_min_p10_falls_back_to_month_end_without_daily_bands(real):
+    lf = fc.forecast_liquid(real["C002"], horizon_months=3, paths=100, with_backtest=False).model_copy(update={"daily": None})
+    assert sm.month_min_p10(lf) == [m.p10 for m in lf.monthly]

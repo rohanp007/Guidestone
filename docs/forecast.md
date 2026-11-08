@@ -69,6 +69,29 @@ Seeds are derived from a stable hash of the profile id and the arguments, so the
 month-end coverage there is 0.33 even though the bands it is shown with are calibrated). Calibration is only meaningful in
 aggregate, across customers; the held-out numbers below are the ones to quote.
 
+## Two band calibrations, and bands that never narrow
+
+The saved calibration holds **two** factor sets (day 30 / 90 / 180 anchors): `daily_factors` (fit on every day) and `month_end_factors`
+(fit on month-end days only). For C002 they are 8.16 / 2.23 / 2.03 and 2.07 / 1.57 / 1.76. The daily band is therefore much wider than
+the month-end band for the same date, and the gap is largest near day 30 to 90: C002's calibrated daily band at day 90 is about 1,061 wide
+(p10 to p90) against about 318 for the month-end band two days later. A chart that switches from the daily band to month-end points shows
+that step. It is a property of how the factors were fit (daily errors include paycheck and bill timing, which month-end points mostly
+avoid), not a bug in the switch.
+
+The factors are fit per horizon bucket and interpolated between anchors, and the short-horizon factor is large because the raw band is
+tiny there. Interpolated down to the next anchor it falls faster than the raw band grows, so the calibrated band used to get **narrower**
+between day 30 and day 90 (C002: 1,099 wide at day 30, 487 at day 90). `forecast.no_narrowing()` now makes each day's band at least as wide
+as the widest earlier one (both sides scaled alike, the median untouched). It can only widen a band, so the held-out coverage above is a
+floor for it. The price: a band can be **flat** for a stretch (C002's daily band is flat from day 30 to 90) instead of strictly widening.
+A strictly widening band needs the calibration refit with a width constraint; that was considered and deliberately not done.
+
+## The cushion measures in the payoff and simulation summaries
+
+`cushion_min_p10` (`SimSummary.min_p10`) and `months_p10_below_cushion` use each month's **lowest daily p10 balance**, not the month-end
+balance. Paydays often land on the last business day, so month-end points sit just after income arrives and hide the dip before it (C067's
+lump-sum plan: lowest month-end p10 8,077, lowest daily p10 5,771). The end balance (`end_p50`) is still the month-end value. Because the
+daily bands carry the wider daily calibration, these numbers are more pessimistic than the month-end ones.
+
 ## Held-out check, and how to read it
 
 Customers were split into two halves; factors fitted on one half were scored on the other (both ways).

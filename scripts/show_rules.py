@@ -22,6 +22,7 @@ def main(ids):
         p = profiles[cid]
         wf, mv, po = rules.priority_waterfall(p), rules.candidate_moves(p), rules.payoff_priority(p)
         print(f"\n===== {cid}  {p.employment}, age {p.age}, credit {p.credit_score}, surplus {money(wf.surplus)}/mo, current step: {wf.current_step}")
+        print(f"   surplus {money(wf.surplus)} - retirement transfers {money(wf.retirement_transfers)} = free surplus {money(wf.free_surplus)}/mo")
         for s in wf.steps:
             mark = ">>" if s.step == wf.current_step else "  "
             print(f"{mark} {s.step} {s.name:<36} {s.status:<14} target {money(s.target):>9}  current {money(s.current):>9}  gap {money(s.gap):>9}  "

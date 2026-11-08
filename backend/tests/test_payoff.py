@@ -163,10 +163,12 @@ def test_c067_single_card(real):
     w = {w.code: w for w in d.warnings}["tradeoff_low_cushion"]                # D dips under the 3-month target, not under the 1-month floor
     assert w.limit == pytest.approx(1 * ess, abs=0.01) and w.amount == pytest.approx(ci.scenario.min_p10, abs=0.01)
     assert f"months_p10_below_cushion={ci.scenario.months_p10_below_cushion}" in w.detail and f"{ci.scenario.min_p10:,.2f}" in w.detail
-    # same basis for the count and the minimum: month-end p10. C dips $7 under the target (10,504 vs 10,511): counted, but not material
-    assert all("tradeoff_low_cushion" not in {x.code for x in r.strategies[c].warnings} for c in "ABCE")
+    # same basis for the count and the minimum: each month's lowest DAILY p10 (not the month-end, which sits just after payday). With it
+    # C (the lump sum, then minimums) dips well under the target too, so it carries the warning as well; A, B and E never get near it
+    assert all("tradeoff_low_cushion" not in {x.code for x in r.strategies[c].warnings} for c in "ABE")
+    assert "tradeoff_low_cushion" in {x.code for x in r.strategies["C"].warnings}
     c_ci = r.strategies["C"].cushion_impact
-    assert 0 < c_ci.cushion - c_ci.scenario.min_p10 < 100 and c_ci.scenario.months_p10_below_cushion == 1
+    assert c_ci.cushion - c_ci.scenario.min_p10 > max(100, 0.02 * c_ci.cushion) and c_ci.scenario.min_p10 >= 1 * ess
     assert d.cushion_impact.cushion - d.cushion_impact.scenario.min_p10 > max(100, 0.02 * d.cushion_impact.cushion)
     for c, s in r.strategies.items():
         assert (s.cushion_impact.scenario.months_p10_below_cushion > 0) == (s.cushion_impact.scenario.min_p10 < s.cushion_impact.cushion)

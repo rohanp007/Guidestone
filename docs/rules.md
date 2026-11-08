@@ -12,14 +12,18 @@ Definitions used throughout:
 - **Liquid cash**: checking + savings balances. CDs, IRAs, home and vehicle are not liquid.
 - **Essentials (monthly)**: housing, utilities, insurance, loan minimums, groceries, healthcare,
   transport — the same "one month of essentials" used for the forecast cushion.
-- **Surplus (monthly)**: net income − non-debt expenses − debt minimum payments.
+- **Surplus (monthly)**: net income − non-debt expenses − debt minimum payments. It does **not** include money that already leaves cash
+  for retirement accounts (the monthly IRA transfer).
+- **Free surplus (monthly)**: surplus − existing retirement transfers (never below 0). This is what the waterfall and the payoff default
+  share out. Those transfers are already spent: they count as step 5 progress, and counting them again as money for the cushion or for
+  debt would use the same dollars twice. Cash (the cushion's, the forecast's, the waterfall's) is checking + savings alike.
 - **Safe savings rate**: the high-yield savings rate in `assumptions.json`.
 
 ---
 
 ## 1. Priority waterfall — `priority_waterfall(profile)`
 
-Orders where each dollar of **monthly surplus** should go.
+Orders where each dollar of **free surplus** (monthly surplus less existing retirement transfers) should go.
 
 Returns an ordered list of:
 ```
@@ -39,14 +43,16 @@ status ∈ done | in_progress | todo | not_applicable | unknown
 
 Rules:
 - A step is `done` when its target is met.
-- The **first step that is not done receives the surplus**. If the surplus exceeds that step's
-  gap, the remainder flows to the next step not done. `monthly_suggested` records the split.
+- The **first step that is not done receives the free surplus**. If it exceeds that step's gap, the remainder flows to the next step not
+  done. `monthly_suggested` records the split. Existing retirement transfers are not allocated again: they count toward step 5's progress.
+  The result reports `surplus`, `retirement_transfers` and `free_surplus`; `months_to_target` uses the allocation, so it matches the cash
+  the forecast shows growing.
 - **`unknown` does not block the order.** Step 2 is `unknown` because the dataset has no 401(k)
   contribution data: show a "confirm your 401(k) match" prompt and let the surplus continue.
 - Step 5 counts IRA transfers observed in the 24-month history. 401(k) contributions are unknown.
 - **Retirement comes before education, always.** When both apply, the advisor says so plainly.
 - Surplus left after steps 1–6 flows to step 7 (extra investing when there is no moderate-APR debt); `unallocated` is only what remains after that.
-- If surplus ≤ 0, every `monthly_suggested` is 0 and the waterfall reports the current step only.
+- If free surplus ≤ 0, every `monthly_suggested` is 0. If surplus < 0 the waterfall reports `current_step = "gap"`.
 - Future work (no data yet): self-employment and single-earner household as 6-month triggers.
 
 ---
@@ -82,12 +88,13 @@ Returns:
 7. **Snowball alternative.** If there are 3 or more debts under $2,000, also compute snowball
    (smallest balance first) and report `snowball_extra_cost` (extra interest vs avalanche). It is a
    valid choice for motivation; state the cost.
-8. **Flags:** `no_debt`, `no_surplus` (surplus ≤ 0: no extra monthly payment possible),
+8. **Flags:** `no_debt`, `no_surplus` (free surplus ≤ 0: no extra monthly payment possible),
    `tradeoff_low_cushion`, `keep_cash_earns_more`, `promo_rate_expiring` (if present),
    `prepayment_penalty_assumed_none`.
 
 ### How the waterfall and payoff rules fit together
-- The **waterfall governs monthly surplus**. **Payoff rule 1 governs lump sums from existing cash.**
+- The **waterfall governs monthly free surplus** (`extra_monthly = None` in `payoff_priority` means the free surplus). **Payoff rule 1
+  governs lump sums from existing cash.**
 - So monthly surplus may go to a high-APR card (step 3) before the cushion is full (step 4), but a
   lump sum never drains the cushion below 3 months (1 month for cards ≥ 20% APR, flagged).
 

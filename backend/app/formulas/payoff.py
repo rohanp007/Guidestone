@@ -48,10 +48,10 @@ class PayoffWarning(Base):
 
 class SimSummary(Base):
     end_p50: float                            # median liquid cash at the last month end
-    min_p10: float                            # lowest month-end p10 (the pessimistic band) in the window
+    min_p10: float                            # lowest p10 (the pessimistic band) of any day in the window: each month's minimum DAILY balance
     overdraft_prob: float                     # probability of dropping below $0 at some point
     cushion_prob: float                       # ...below the cushion target
-    months_p10_below_cushion: int                 # month ends where the p10 band (the same one min_p10 is the lowest of) is below the cushion target
+    months_p10_below_cushion: int                 # months whose lowest daily p10 balance (the same one min_p10 is the lowest of) is below the cushion target
 
 
 class SimDiff(Base):
