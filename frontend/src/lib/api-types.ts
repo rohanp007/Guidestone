@@ -208,6 +208,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/me/agent/{event}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Run Event */
+        post: operations["run_event_api_me_agent__event__post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -259,6 +276,53 @@ export interface components {
             auto_renew?: boolean | null;
             /** Penalty Days */
             penalty_days?: number | null;
+        };
+        /** AnalysisResult */
+        AnalysisResult: {
+            /** Run Id */
+            run_id: string;
+            /** Event */
+            event: string;
+            /** Feature */
+            feature: string;
+            /** Customer Id */
+            customer_id: string;
+            /** As Of */
+            as_of: string;
+            /** Prompt Version */
+            prompt_version: string;
+            /** Data Version */
+            data_version: string;
+            /** Inputs */
+            inputs: {
+                [key: string]: unknown;
+            };
+            /** Compute */
+            compute: {
+                [key: string]: unknown;
+            };
+            /** Facts */
+            facts: {
+                [key: string]: unknown;
+            };
+            /** Status */
+            status: string | null;
+            summary: components["schemas"]["HeadlineSummary"] | null;
+            /** Research */
+            research?: unknown[];
+            /** Advice */
+            advice?: unknown | null;
+            /** Trace */
+            trace: components["schemas"]["TraceStep"][];
+            /** Llm Trace */
+            llm_trace: {
+                [key: string]: unknown;
+            }[];
+            /**
+             * Degraded
+             * @default false
+             */
+            degraded?: boolean;
         };
         /** AssumptionsResponse */
         AssumptionsResponse: {
@@ -317,10 +381,30 @@ export interface components {
                 [key: string]: unknown;
             } | null;
         };
+        /** GroundingSummary */
+        GroundingSummary: {
+            /** Ok */
+            ok: boolean;
+            /** Checked */
+            checked: number;
+            /** Retried */
+            retried: boolean;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /** HeadlineSummary */
+        HeadlineSummary: {
+            /** Text */
+            text: string;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "model" | "template";
+            grounding: components["schemas"]["GroundingSummary"];
         };
         /** Health */
         Health: {
@@ -685,6 +769,33 @@ export interface components {
             day: number;
             /** Events */
             events: number;
+        };
+        /**
+         * TraceStep
+         * @description One step of a run. `detail` holds flags, codes and counts only: never prompt text, model text or rejected arguments.
+         */
+        TraceStep: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "precompute" | "plan" | "plan_rejected" | "tool" | "explain" | "fallback" | "cache_hit";
+            /** Name */
+            name: string;
+            /**
+             * Ms
+             * @default 0
+             */
+            ms?: number;
+            /**
+             * Ok
+             * @default true
+             */
+            ok?: boolean;
+            /** Detail */
+            detail?: {
+                [key: string]: unknown;
+            };
         };
         /** Transaction */
         Transaction: {
@@ -1405,6 +1516,53 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
+            };
+        };
+    };
+    run_event_api_me_agent__event__post: {
+        parameters: {
+            query?: {
+                refresh?: number;
+            };
+            header?: never;
+            path: {
+                event: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisResult"];
+                };
+            };
+            /** @description A newer run for the same event replaced this one. Expected: ignore it and use the newer run's result. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description The run took too long before anything could be returned. */
+            504: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

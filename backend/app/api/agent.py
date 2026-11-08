@@ -10,6 +10,7 @@ from pydantic import ValidationError
 
 from ..agent import orchestrator
 from ..agent.cache import RunSuperseded
+from ..agent.models import AnalysisResult
 from ..agent.events import EVENTS
 from ..auth import User, current_user
 from ..data.loader import load_profiles
@@ -19,7 +20,9 @@ log = logging.getLogger("guidestone.agent")
 router = APIRouter(prefix="/api", tags=["agent"])
 
 
-@router.post("/me/agent/{event}")
+@router.post("/me/agent/{event}", response_model=AnalysisResult, responses={
+    409: {"description": "A newer run for the same event replaced this one. Expected: ignore it and use the newer run's result."},
+    504: {"description": "The run took too long before anything could be returned."}})
 async def run_event(event: str, request: Request, refresh: int = 0, user: User = Depends(current_user)):
     if event not in EVENTS:
         raise HTTPException(status_code=404, detail=f"event {event} not found")

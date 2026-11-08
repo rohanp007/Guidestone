@@ -17,6 +17,7 @@ export type PaycheckToPaycheck = Schemas["PaycheckToPaycheck"];
 export type ForecastArgs = Schemas["ForecastArgs"];
 export type Me = Schemas["Me"];
 export type DemoPersona = Schemas["DemoPersona"];
+export type AnalysisResult = Schemas["AnalysisResult"];
 
 export type TransactionQuery = NonNullable<paths["/api/profiles/{id}/transactions"]["get"]["parameters"]["query"]>;
 
@@ -79,3 +80,17 @@ export async function runFormula<T = unknown>(id: string, name: string, args: Re
 export const forecastLiquid = (id: string, args: ForecastArgs = {}) => runFormula<LiquidForecast>(id, "forecast_liquid", args);
 export const forecastLiquidSummary = (id: string, args: ForecastArgs = {}) => runFormula<LiquidForecast>(id, "forecast_liquid_summary", args);
 export const paycheckToPaycheck = (id: string) => runFormula<PaycheckToPaycheck>(id, "paycheck_to_paycheck");
+
+/** Run an orchestrator event for the signed-in customer. Returns null when a newer run replaced this one (409): that is expected
+ *  (the sign-in warm-up, a refresh), so callers just ignore it and use the newer run's result instead of showing an error. */
+export async function runAgent(event: string, opts: { refresh?: boolean; params?: Record<string, unknown> } = {}): Promise<{ result: AnalysisResult; cached: boolean } | null> {
+  try {
+    const { data, headers } = await request<AnalysisResult>(`/api/me/agent/${encodeURIComponent(event)}${query({ refresh: opts.refresh ? 1 : undefined })}`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(opts.params ?? {}),
+    });
+    return { result: data, cached: headers.get("X-Cache") === "hit" };
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 409) return null;
+    throw e;
+  }
+}

@@ -3,6 +3,8 @@ assumptions with source text, month-by-month probability lists, backtest stats a
 not help write a sentence, and invite the model to invent figures)."""
 from __future__ import annotations
 
+from datetime import date
+
 from ..api.serialize import to_plain
 from ..data.models import LiquidForecast
 
@@ -62,3 +64,78 @@ def forecast_facts(f: LiquidForecast, n_events: int = 3) -> dict:
                         for e in sorted(f.events, key=lambda e: e.day)[:n_events]],
     }
     return to_plain({k: v for k, v in out.items() if v is not None})
+
+
+# ---- what the model sees -------------------------------------------------------------------------------------------------------
+# The full fact sheet (codes, numbers, overall_status) is for code, the grounding check and the UI. The model gets a plain-language
+# view with no codes and no numbers: label phrases, and {placeholders} that the app fills in. It cannot leak a name it never saw,
+# or mistype a figure it never wrote.
+
+CUSHION_TEXT = {"below_now": "starts below your safety cushion", "dips_temporarily": "dips below your safety cushion for a while",
+                "stays_above": "stays above your safety cushion"}
+TREND_TEXT = {"rising": "rising", "flat": "roughly flat", "falling": "falling"}
+OVERDRAFT_TEXT = {"none": "no overdraft is expected", "possible": "an overdraft is possible", "likely": "an overdraft is likely"}
+
+
+def _usd(x: float) -> str:
+    return f"${abs(x):,.0f}"
+
+
+def _day(iso: str, year: bool = False) -> str:
+    d = date.fromisoformat(iso)
+    return f"{d.strftime('%b')} {d.day}" + (f", {d.year}" if year else "")
+
+
+def _pct(x: float) -> str:
+    return f"{x * 100:.0f}%" if x >= 0.01 or x == 0 else f"{x * 100:.1f}%"
+
+
+def placeholders(facts: dict) -> dict[str, str]:
+    """{name: text} for every amount, date and percentage the model may refer to. Built from the facts, so each fills in a real figure."""
+    ph = {"start_balance": _usd(facts["start_balance"]), "monthly_gain": _usd(facts["monthly_gain"]),
+          "lowest_point": _usd(facts["low_point"]["amount"]), "lowest_point_date": _day(facts["low_point"]["date"]),
+          "cushion": _usd(facts["cushion"]), "days_below_cushion": _pct(facts.get("share_of_days_below_cushion", 0)),
+          "chance_of_overdraft": _pct(facts.get("chance_of_overdraft", 0))}
+    if facts.get("cushion_status_until"):
+        ph["cushion_until"] = _day(facts["cushion_status_until"])
+    if end := facts.get("end_balance"):
+        ph["end_balance"], ph["end_date"] = _usd(end["p50"]), _day(end["date"], year=True)
+    if twelve := facts.get("balance_in_12_months"):
+        ph["balance_in_12_months"] = _usd(twelve["p50"])
+    for i, e in enumerate(facts.get("next_events", []), 1):
+        ph[f"event_{i}"] = f"{e['what']} ({_day(e['date'], year=True)})"
+    return ph
+
+
+_PH_MEANS = {"start_balance": "balance today", "monthly_gain": "average monthly change in cash", "lowest_point": "lowest expected balance",
+             "lowest_point_date": "when that lowest balance comes", "cushion": "size of the safety cushion (one month of essentials)",
+             "days_below_cushion": "percentage of days spent below the cushion", "chance_of_overdraft": "chance of overdrawing the account",
+             "cushion_until": "last day below the cushion", "end_balance": "typical balance at the end of the period",
+             "end_date": "the date of that end balance", "balance_in_12_months": "typical balance a year from now"}
+
+
+def salient(facts: dict) -> list[str]:
+    """The placeholders worth offering this customer. Offered all of them, a small model uses all of them; offering the ones that
+    explain the situation keeps the sentence short. (Any placeholder that exists still fills in if the model writes it.)"""
+    ph = placeholders(facts)
+    names = ["monthly_gain"]
+    if facts["cushion_status"] != "stays_above":
+        names += ["lowest_point", "lowest_point_date", "cushion", "cushion_until", "days_below_cushion"]
+    if facts["overdraft_status"] != "none":
+        names.append("chance_of_overdraft")
+    names += ["end_balance", "end_date"]
+    return [n for n in names if n in ph]
+
+
+def model_view(facts: dict) -> str:
+    """The fact sheet as the model sees it: plain phrases and {placeholders}, no codes, no numbers, no overall judgment."""
+    ph = placeholders(facts)
+    until = " until {cushion_until}" if "cushion_until" in ph and facts["cushion_status"] != "stays_above" else ""
+    lines = [
+        f"Customer: {'retired' if facts.get('employment') == 'retired' else 'employed'}"
+        f"{', often runs low before payday' if facts.get('paycheck_to_paycheck') == 'yes' else ''}.",
+        f"Over the next {facts['horizon_months']} months their balance is {TREND_TEXT[facts['trend']]}; it "
+        f"{CUSHION_TEXT[facts['cushion_status']]}{until}; {OVERDRAFT_TEXT[facts['overdraft_status']]}.",
+        "Placeholders you may use (write them exactly, with the braces; the app fills in the figure):"]
+    lines += [f"{{{k}}} = {_PH_MEANS.get(k, 'an upcoming change')}" for k in salient(facts)]
+    return "\n".join(lines)

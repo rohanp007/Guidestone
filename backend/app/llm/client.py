@@ -329,5 +329,6 @@ async def complete(agent: str, messages: list[dict], tools: list[Tool] | None = 
     finally:
         entry = {"agent": agent, "backend": cfg.backend, "model": cfg.model, "latency_ms": round(stats.latency_ms, 1),
                  "prompt_tokens": stats.prompt_tokens, "completion_tokens": stats.completion_tokens, "ok": ok,
-                 "tool_choice_downgraded": stats.tool_choice_downgraded}
+                 "tool_choice_downgraded": stats.tool_choice_downgraded,
+                 "temperature": cfg.temperature if temperature is None else temperature}
         record(entry)

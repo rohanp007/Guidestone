@@ -9,6 +9,7 @@ import asyncio, os, sys, time
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "backend"))
 
 from app.agent import cache, orchestrator              # noqa: E402
+from app.agent.events import get_event                  # noqa: E402
 from app.config import FEATURED_PERSONAS               # noqa: E402
 from app.data.loader import load_profiles              # noqa: E402
 from app.llm import client                             # noqa: E402
@@ -17,7 +18,7 @@ MAX_UNCACHED_S, MAX_CACHED_MS = 5.0, 50.0
 
 
 async def main() -> int:
-    profiles, bad = load_profiles(), []
+    profiles, bad, same_count = load_profiles(), [], 0
     cache.clear()
     client.prewarm()                                        # as the server does at startup
     for cid in FEATURED_PERSONAS:
@@ -27,8 +28,11 @@ async def main() -> int:
         planned = [s.name for s in r.trace if s.kind == "tool"]
         rejected = [f"{s.name}:{s.detail['code']}" for s in r.trace if s.kind == "plan_rejected"]
         fallbacks = [s.name for s in r.trace if s.kind == "fallback"]
+        default = [step.tool for step in get_event("dashboard_open").default_plan(p)]
+        same = planned == default and "plan" not in fallbacks              # a fallback plan IS the default, so it proves nothing
+        same_count += same
         print(f"{cid} ({p.employment}): plan={planned or '-'} rejected={rejected or '-'} fallbacks={fallbacks or '-'} status={r.status} "
-              f"source={r.summary.source} grounded={r.summary.grounding.ok}")
+              f"plan==default plan: {same}  source={r.summary.source} grounded={r.summary.grounding.ok}")
         print(f"   {r.summary.text}")
         print(f"   {cold:.1f} s uncached, {warm:.1f} ms cached, degraded={r.degraded}")
         if not r.summary.grounding.ok: bad.append(f"{cid}: summary not grounded")
@@ -36,6 +40,8 @@ async def main() -> int:
         if warm > MAX_CACHED_MS or not orchestrator.is_cache_hit(hit): bad.append(f"{cid}: cached call {warm:.0f} ms")
         if p.employment == "retired" and planned: bad.append(f"{cid}: retiree planned {planned}")
         if cid in ("C002", "C067") and "job_loss_stress" not in planned: bad.append(f"{cid}: did not plan job_loss_stress")
+    n = len(FEATURED_PERSONAS)
+    print(f"plan == default plan for {same_count} of {n} personas" + ("" if same_count < n else ": the planner decides nothing for this event yet"))
     print("FAIL: " + "; ".join(bad) if bad else "OK")
     return 1 if bad else 0
 

@@ -181,7 +181,7 @@ def _date_parts(iso: str) -> tuple[int, int, int]:
     return d.year, d.month, d.day
 
 
-def check(text: str, facts: dict, context_numbers: tuple[float, ...] = (), judgments: bool = False) -> GroundingReport:
+def check(text: str, facts: dict, context_numbers: tuple[float, ...] = (), judgments: bool = False, style: bool = False) -> GroundingReport:
     """context_numbers: figures that come from the question, not the facts (e.g. 12 when the horizon asked about is 12 months)."""
     allowed = flatten(facts) + derived(facts)
     dates = [f for f in allowed if f.kind == "date"]
@@ -260,7 +260,7 @@ def check(text: str, facts: dict, context_numbers: tuple[float, ...] = (), judgm
         hit = next((f for f in pool if (_money_matches(v, False, None, abs(f.value)) if f.kind == "money" else abs(v - f.value) <= 0.005)), None)
         numbers.append(CheckedNumber(m.group(0), v, "number", hit.path if hit else None))
 
-    conflicts = check_wording(text, facts, judgments)
+    conflicts = check_wording(text, facts, judgments) + (check_style(text, facts) if style else [])
     return GroundingReport(all(n.matched_fact for n in numbers) and not conflicts, numbers, conflicts)
 
 
@@ -314,6 +314,35 @@ EVALUATIVE = re.compile(
     r"|\bsafe(?:ly)?\b|\bsecure\b|\bhealthy\b|\b(?:on|off) track\b|\bgood shape\b|\bwell[- ]positioned\b|\bnothing to worry\b"
     r"|\bno (?:cause|need|reason) (?:for|to) (?:concern|worry|alarm)\b|\bworr\w+|\bconcern(?:ing|ed)?\b|\breassur\w+|\balarm\w*"
     r"|\bcomfortabl[ye]\b|\bdanger\w*|\bcritical\b|\bin trouble\b|\bdoing (?:well|great|fine)\b", re.I)
+
+
+# Plain English only: nothing from the machinery may reach the customer.
+SNAKE = re.compile(r"\b[A-Za-z]+(?:_[A-Za-z0-9]+)+\b")                                   # cushion_status, start_balance, ...
+RAW_WORDS = re.compile(r"\b(?:null|none|true|false|nan|undefined)\b|\bp(?:10|50|90)\b|\b(?:hint|field)s?\b", re.I)
+BRACES = re.compile(r"\{[^{}]*\}|<[^<>]*>|`")                                            # an unfilled {placeholder}, <tag>, backtick
+
+
+def _key_names(facts: Any, out: set[str] | None = None) -> set[str]:
+    out = set() if out is None else out
+    if isinstance(facts, dict):
+        for k, v in facts.items():
+            out.add(k)
+            _key_names(v, out)
+    elif isinstance(facts, list):
+        for v in facts:
+            _key_names(v, out)
+    return out
+
+
+def check_style(text: str, facts: dict) -> list[Conflict]:
+    """Machinery showing through: snake_case names, null / None / true / false, a fact key written like code (`trend:`, `"cushion"`),
+    mentions of a hint or field, and anything left in braces."""
+    out = [Conflict(m.group(0), "style", "plain English") for pat in (SNAKE, RAW_WORDS, BRACES) for m in pat.finditer(text)]
+    plain_keys = [k for k in _key_names(facts) if "_" not in k and len(k) > 2]            # single-word keys are also ordinary words
+    for k in plain_keys:
+        for m in re.finditer(rf"\b{re.escape(k)}\b\s*[:=]|[\"']{re.escape(k)}[\"']", text):
+            out.append(Conflict(m.group(0).strip(), "style", "plain English"))
+    return out
 
 
 def check_wording(text: str, facts: dict, judgments: bool = False) -> list[Conflict]:
@@ -385,48 +414,68 @@ def _texts(parsed: BaseModel, fields: tuple[str, ...]) -> str:
     return " ".join(v for f in fields if (v := getattr(parsed, f, None)))
 
 
+def fill(text: str | None, values: dict[str, str]) -> str | None:
+    """Replace {name} with its value (and collapse a doubled unit: "{p}%" with p = "2%"). Unknown names stay in braces, where the style check finds them."""
+    if text is None:
+        return None
+    out = re.sub(r"\{(\w+)\}", lambda m: values.get(m.group(1), m.group(0)), text)
+    return out.replace("%%", "%").replace("$$", "$")         # the model often types the unit after a placeholder that already has it
+
+
 async def grounded_complete(agent: str, messages: list[dict], facts: dict, schema: type[BaseModel], text_field: str = "summary",
                             extra_fields: tuple[str, ...] = (), context_numbers: tuple[float, ...] = (), forbid_judgments: bool = False,
-                            **kwargs) -> GroundedResult:
-    """complete() with json_schema=schema, then check `text_field` and `extra_fields` against `facts` (figures, wording, and with
-    forbid_judgments, evaluative wording). Not grounded: one retry that names the problems, then template(facts) in `text_field`.
-    Records the outcome in the run trace (counts and flags only)."""
+                            placeholders: dict[str, str] | None = None, style: bool = False, **kwargs) -> GroundedResult:
+    """complete() with json_schema=schema, then check `text_field` and `extra_fields` against `facts`: figures, wording, and optionally
+    evaluative wording (forbid_judgments) and plain-English style (style). `placeholders` are filled in before checking, so the checks
+    see what the customer would read. Not grounded: one retry that names the problems, then template(facts) in `text_field`.
+    Records the outcome in the run trace (counts, flags and the retry temperature; no text)."""
     fields = (text_field, *extra_fields)
-    verify = lambda parsed: check(_texts(parsed, fields), facts, context_numbers, forbid_judgments)
+
+    def filled(parsed: BaseModel) -> BaseModel:
+        if not placeholders:
+            return parsed
+        return parsed.model_copy(update={f: fill(getattr(parsed, f, None), placeholders) for f in fields if hasattr(parsed, f)})
+
+    verify = lambda parsed: check(_texts(parsed, fields), facts, context_numbers, forbid_judgments, style)
     result = await client.complete(agent, messages, json_schema=schema, **kwargs)
-    calls, parsed = [result], result.parsed
+    calls, parsed = [result], filled(result.parsed)
     report = verify(parsed)
     retried = used_template = False
     if not report.ok:
         retried = True
-        judged = [c for c in report.conflicts if c.field == "judgment"]
+        by = lambda field: [c for c in report.conflicts if c.field == field]
+        status = [c for c in report.conflicts if c.field not in ("judgment", "style")]
         complaint = ""
         if report.unmatched:
             complaint += f"These figures are not in the facts: {', '.join(n.text for n in report.unmatched)}. "
-        if len(judged) < len(report.conflicts):
-            complaint += ("These statements contradict the facts: "
-                          + "; ".join(f'"{c.phrase}" ({c.field} is {c.status})' for c in report.conflicts if c.field != "judgment") + ". ")
-        if judged:
+        if status:
+            complaint += "These statements contradict the facts: " + "; ".join(f'"{c.phrase}" ({c.field} is {c.status})' for c in status) + ". "
+        if by("judgment"):
             complaint += ("Do not state a judgment, risk level or reassurance; the app shows that separately. Remove: "
-                          + "; ".join(f'"{c.phrase}"' for c in judged) + ". ")
+                          + "; ".join(f'"{c.phrase}"' for c in by("judgment")) + ". ")
+        if by("style"):
+            complaint += ("Write plain English, with only the listed {placeholders} for figures. Do not use: "
+                          + "; ".join(f'"{c.phrase}"' for c in by("style")) + ". ")
         retry = await client.complete(
             agent, messages + [{"role": "assistant", "content": result.content},
                                {"role": "user", "content": complaint + "Rewrite using only figures from the facts."}],
             json_schema=schema, **{**kwargs, "temperature": RETRY_TEMPERATURE})
         calls.append(retry)
-        parsed = retry.parsed
+        parsed = filled(retry.parsed)
         report = verify(parsed)
         if not report.ok:
             used_template, parsed = True, schema.model_validate({text_field: template(facts)})
             report = verify(parsed)
     client.record({"kind": "grounding", "agent": agent, "numbers_checked": len(report.numbers),
-                   "wording_conflicts": len(report.conflicts), "retried": retried, "used_template": used_template, "ok": report.ok})
+                   "wording_conflicts": len(report.conflicts), "retried": retried, "retry_temperature": RETRY_TEMPERATURE if retried else None,
+                   "used_template": used_template, "ok": report.ok})
     return GroundedResult(getattr(parsed, text_field), parsed, report, retried, used_template, calls)
 
 
-async def explain(agent: str, messages: list[dict], facts: dict, context_numbers: tuple[float, ...] = (), **kwargs) -> GroundedResult:
-    """The standard writing step: an Explanation (explanation + optional next_step_hint) that is figure-checked, wording-checked and
-    free of judgments. The overall judgment is facts["overall_status"], shown by the app."""
+async def explain(agent: str, messages: list[dict], facts: dict, context_numbers: tuple[float, ...] = (),
+                  placeholders: dict[str, str] | None = None, **kwargs) -> GroundedResult:
+    """The standard writing step: an Explanation that is figure-checked, wording-checked, free of judgments and in plain English. The
+    model writes {placeholders}; the app fills them in. The overall judgment is facts["overall_status"], shown by the app."""
     from .schemas import Explanation
-    return await grounded_complete(agent, messages, facts, Explanation, "explanation", ("next_step_hint",), context_numbers,
-                                   forbid_judgments=True, **kwargs)
+    return await grounded_complete(agent, messages, facts, Explanation, "explanation", (), context_numbers, forbid_judgments=True,
+                                   placeholders=placeholders, style=True, **kwargs)

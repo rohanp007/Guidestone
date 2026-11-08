@@ -81,7 +81,7 @@ def test_happy_path(fake, profiles):
     assert {"forecast_liquid_summary", "paycheck_to_paycheck", "job_loss_stress"} <= set(r.compute)
     assert r.compute["job_loss_stress"]["applicable"] is True
     assert r.status == r.facts["overall_status"] == "watch"                         # decided in code
-    assert r.facts["paycheck_to_paycheck"] in ("yes", "no") and r.facts["employment"] == "employed" and "display" in r.facts
+    assert r.facts["paycheck_to_paycheck"] in ("yes", "no") and r.facts["employment"] == "employed"
     assert r.summary.source == "model" and r.summary.text == GOOD_TEXT and r.summary.grounding.ok
     assert kinds(r) == ["precompute", "precompute", "plan", "tool", "explain"]
     assert [s.name for s in r.trace if s.kind == "tool"] == ["job_loss_stress"] and all(s.ok for s in r.trace)
@@ -313,3 +313,27 @@ def test_sign_in_starts_the_dashboard_run_in_the_background(fake, monkeypatch):
     monkeypatch.setenv("AGENT_WARM_ON_LOGIN", "true")
     session_for("C067")
     assert seen == [("dashboard_open", "C067", {})]
+
+
+def test_placeholders_are_filled_and_the_model_never_sees_codes(fake, profiles):
+    import re
+    fake.text = "Your balance dips below your cushion until {cushion_until}, then rises {monthly_gain} a month."
+    r = go(profiles["C002"])
+    assert r.summary.source == "model" and "{" not in r.summary.text and "$570" in r.summary.text and "Dec 14" in r.summary.text
+    writer = next(m for m in fake.messages if m[0]["content"].startswith("You are a careful financial assistant"))
+    view = writer[1]["content"]
+    assert re.findall(r"\d+", re.sub(r"\{\w+\}", "", view)) == ["24"] and "_status" not in view and "watch" not in view
+    assert r.facts["cushion_status"] == "dips_temporarily"                          # the codes stay in the result, for the UI
+
+
+def test_machinery_in_the_summary_is_rejected(fake, profiles):
+    fake.text = "The cushion_status is stays_above and the next step hint is null."
+    r = go(profiles["C002"])
+    assert r.summary.source == "template" and "_" not in r.summary.text and "null" not in r.summary.text and r.degraded
+
+
+def test_the_endpoint_is_in_the_openapi_schema(fake):
+    schema = session_for("C002").get("/openapi.json").json()
+    assert "AnalysisResult" in schema["components"]["schemas"] and "HeadlineSummary" in schema["components"]["schemas"]
+    post = schema["paths"]["/api/me/agent/{event}"]["post"]
+    assert post["responses"]["200"]["content"]["application/json"]["schema"]["$ref"].endswith("AnalysisResult") and "409" in post["responses"]

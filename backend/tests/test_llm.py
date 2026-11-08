@@ -120,7 +120,7 @@ def test_trace_has_no_prompt_or_reasoning(server):
     run(complete("advisor", [{"role": "user", "content": "SECRET-PROMPT"}]))
     entry = client.TRACE[-1]
     assert set(entry) == {"agent", "backend", "model", "latency_ms", "prompt_tokens", "completion_tokens", "ok",
-                         "tool_choice_downgraded"}
+                         "tool_choice_downgraded", "temperature"}
     assert entry["ok"] and entry["agent"] == "advisor" and entry["prompt_tokens"] == 10 and entry["completion_tokens"] == 5
     assert "SECRET" not in json.dumps(entry)
 

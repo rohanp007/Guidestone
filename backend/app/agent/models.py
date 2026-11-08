@@ -44,11 +44,10 @@ class GroundingSummary(BaseModel):
     retried: bool
 
 
-class Summary(BaseModel):
+class HeadlineSummary(BaseModel):
     text: str
     source: Literal["model", "template"]
     grounding: GroundingSummary
-    hint: str | None = None
 
 
 class AnalysisResult(BaseModel):
@@ -63,7 +62,7 @@ class AnalysisResult(BaseModel):
     compute: dict[str, Any]                  # formula results by name (plain JSON)
     facts: dict[str, Any]                    # the fact sheet the explanation used
     status: str | None                       # overall_status, decided in code
-    summary: Summary | None
+    summary: HeadlineSummary | None
     research: list[Any] = Field(default_factory=list)       # empty in v1
     advice: Any | None = None                                # empty in v1
     trace: list[TraceStep]

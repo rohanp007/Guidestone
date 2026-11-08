@@ -127,7 +127,7 @@ def test_clean_answer_is_kept(server, facts):
     assert out.text == "You gain about $552 a month." and not out.retried and not out.used_template and len(server.requests) == 1
     assert client.TRACE[-1] == {"kind": "grounding", "agent": "orchestrator", "numbers_checked": 1, "wording_conflicts": 0,
                                 "retried": False,
-                                "used_template": False, "ok": True}
+                                "retry_temperature": None, "used_template": False, "ok": True}
 
 
 def test_one_retry_names_the_bad_figures(server, facts):
@@ -139,6 +139,7 @@ def test_one_retry_names_the_bad_figures(server, facts):
     assert any(m["role"] == "user" and "These figures are not in the facts: $4,269.66. Rewrite using only figures from the facts." in m["content"]
                for m in sent)
     assert client.TRACE[-1]["retried"] is True and client.TRACE[-1]["used_template"] is False
+    assert client.TRACE[-1]["retry_temperature"] == 0.4 and server.requests[1]["temperature"] == 0.4 and server.requests[0]["temperature"] == 0
 
 
 def test_retry_that_still_invents_uses_the_template(server, facts):
@@ -266,8 +267,8 @@ def test_template_is_judgment_free_for_every_customer():
         assert r.ok, (cid, [c.phrase for c in r.conflicts])
 
 
-def _explanation(text, hint=None):
-    return reply(json.dumps({"explanation": text, "next_step_hint": hint}))
+def _explanation(text):
+    return reply(json.dumps({"explanation": text}))
 
 
 def explain_run(facts):
@@ -276,10 +277,10 @@ def explain_run(facts):
 
 def test_explanation_with_a_judgment_is_retried_naming_it(server, facts):
     answers = iter([_explanation("Balances rise, with only a brief dip to $1,628.85 in November, posing no significant risk."),
-                    _explanation("Balances rise about $552 a month, with a dip to $1,629 around Nov 12 under the cushion.", "Build the cushion")])
+                    _explanation("Balances rise about $552 a month, with a dip to $1,629 around Nov 12 under the cushion.")])
     server.handler = lambda b: next(answers)
     out = explain_run(facts)
-    assert out.retried and not out.used_template and out.parsed.next_step_hint == "Build the cushion"
+    assert out.retried and not out.used_template
     sent = [m["content"] for m in server.requests[1]["messages"] if m["role"] == "user"]
     assert any("Do not state a judgment" in m and '"no significant risk"' in m for m in sent)
 
@@ -287,23 +288,15 @@ def test_explanation_with_a_judgment_is_retried_naming_it(server, facts):
 def test_persistent_judgment_falls_back_to_the_template(server, facts):
     server.handler = lambda b: _explanation("Nothing to worry about, you are on track.")
     out = explain_run(facts)
-    assert out.used_template and out.report.ok and out.text == grounding.template(facts) and out.parsed.next_step_hint is None
+    assert out.used_template and out.report.ok and out.text == grounding.template(facts)
     assert client.TRACE[-1]["used_template"] is True
 
 
-def test_next_step_hint_is_checked_too(server, facts):
-    server.handler = lambda b: _explanation("Balances rise about $552 a month.", "Move $5,000 into savings")
-    out = explain_run(facts)
-    assert out.used_template                                                         # $5,000 is not in the facts
-    server.handler = lambda b: _explanation("Balances rise about $552 a month.", None)
-    assert not explain_run(facts).used_template
-
-
 def test_prompt_forbids_judgments_and_schema_is_fixed():
-    from app.llm.prompts import FACTS_PROMPT
+    from app.llm.prompts import EXPLAIN_PROMPT
     from app.llm.schemas import Explanation
-    assert "Do not state an overall judgment, risk level or reassurance. The app shows that separately." in FACTS_PROMPT
-    assert set(Explanation.model_json_schema()["properties"]) == {"explanation", "next_step_hint"}
+    assert "Do not state an overall judgment, risk level or reassurance. The app shows that separately." in EXPLAIN_PROMPT
+    assert set(Explanation.model_json_schema()["properties"]) == {"explanation"}                  # no hint field for the model to fill in
 
 
 def test_bare_numbers_are_checked_too(facts):
@@ -317,3 +310,69 @@ def test_bare_numbers_are_checked_too(facts):
     r = ok("In 2027, over 1-2 sentences, on 2026-11-12, p10 and p50 values.", facts)
     assert r.ok and [n.kind for n in r.numbers] == ["date"]
     assert ok("The raise is 3.1% and the rent change is 2.8%.", facts).ok
+
+
+# ---- plain English: what the model sees, placeholders, style --------------------------------------------------------------------
+
+def test_the_model_sees_phrases_and_placeholders_not_codes_or_numbers(facts):
+    import re
+    from app.llm.facts import model_view, placeholders
+    view = model_view(facts)
+    bare = re.sub(r"\{\w+\}", "", view)                                                # outside the {placeholders}...
+    assert re.findall(r"\d+", bare) == ["12"]                                          # ...only the horizon is a number
+    assert not grounding.SNAKE.findall(bare)                                          # ...and there are no codes
+    for leaked in ("dips_temporarily", "cushion_status", "overall", "watch", "on_track", "_status", "null", "hint"):
+        assert leaked not in view
+    assert "dips below your safety cushion for a while until {cushion_until}" in view and "rising" in view and "no overdraft is expected" in view
+    ph = placeholders(facts)
+    assert ph["monthly_gain"] == "$552" and ph["lowest_point_date"] == "Nov 12" and ph["cushion_until"] == "Dec 14" and ph["days_below_cushion"] == "3%"
+    from app.llm.facts import salient
+    assert all(f"{{{k}}}" in view for k in salient(facts)) and "{event_1}" not in view and "{start_balance}" not in view
+    assert "{lowest_point}" in view                                                  # C002 dips below its cushion: the low point matters
+    # every filled placeholder passes the grounding check
+    text = " ".join(f"{{{k}}}." for k in ph)
+    assert grounding.check(grounding.fill(text, ph), facts).ok
+
+
+def test_placeholders_are_filled_before_checking(server, facts):
+    from app.llm.facts import placeholders
+    server.handler = lambda b: _explanation("Your balance dips below your cushion until {cushion_until}, then rises {monthly_gain} a month.")
+    out = run(grounding.explain("orchestrator", [{"role": "user", "content": "go"}], facts, context_numbers=(12, 24),
+                                placeholders=placeholders(facts)))
+    assert out.text == "Your balance dips below your cushion until Dec 14, then rises $552 a month." and not out.retried
+
+
+def test_style_check(facts):
+    bad = ["The cushion_status is stays_above.", "The next step hint is null.", "The value is None.", "That is true.", "See the field.",
+           "trend: rising", 'the "cushion" key', "It is {monthly_gain} a month.", "Check p50.", "Use `cushion`."]
+    for text in bad:
+        r = grounding.check(text, facts, style=True)
+        assert not r.ok and any(c.field == "style" for c in r.conflicts), text
+    for text in ("Your balance stays above the cushion and the trend is rising.", "A hinted tone, in the field of finance.".replace("hinted", "gentle").replace("field of finance", "world of money")):
+        assert grounding.check(text, facts, style=True).ok, text
+    assert grounding.check("The cushion_status is stays_above.", facts).ok                    # off unless asked
+
+
+def test_unknown_or_unfilled_placeholder_gets_a_retry_then_the_template(server, facts):
+    from app.llm.facts import placeholders
+    answers = iter(["It rises {monthly_gainz} a month, see cushion_status.", "It rises {monthly_gain} a month."])
+    server.handler = lambda b: _explanation(next(answers))
+    out = run(grounding.explain("orchestrator", [{"role": "user", "content": "go"}], facts, placeholders=placeholders(facts)))
+    assert out.retried and not out.used_template and out.text == "It rises $552 a month."
+    sent = [m["content"] for m in server.requests[1]["messages"] if m["role"] == "user"]
+    assert any('Write plain English' in m and '{monthly_gainz}' in m and 'cushion_status' in m for m in sent)
+    server.handler = lambda b: _explanation("The cushion_status is stays_above, hint: null.")
+    out = run(grounding.explain("orchestrator", [{"role": "user", "content": "go"}], facts, placeholders=placeholders(facts)))
+    assert out.used_template and out.report.ok and not grounding.check_style(out.text, facts)
+
+
+def test_template_is_plain_english_for_every_customer():
+    for cid, profile in load_profiles().items():
+        f = forecast_facts(forecast.forecast_liquid_summary(profile, horizon_months=24))
+        r = grounding.check(grounding.template(f), f, judgments=True, style=True)
+        assert r.ok, (cid, [c.phrase for c in r.conflicts])
+
+
+def test_fill_collapses_doubled_units():
+    assert grounding.fill("on {share}% of days, cost ${amount}", {"share": "2%", "amount": "$5"}) == "on 2% of days, cost $5"
+    assert grounding.fill("{unknown} stays", {"x": "1"}) == "{unknown} stays" and grounding.fill(None, {}) is None

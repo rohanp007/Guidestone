@@ -22,13 +22,13 @@ from ..data import loader
 from ..data.models import Profile
 from ..formulas.registry import FORMULAS
 from ..llm import client, grounding
-from ..llm.facts import forecast_facts
-from ..llm.prompts import FACTS_PROMPT
+from ..llm.facts import forecast_facts, model_view, placeholders
+from ..llm.prompts import EXPLAIN_PROMPT
 from ..llm.tools import Tool, session_tool
 from . import cache
 from .events import EventSpec, get_event
-from .models import MAX_STEPS, AnalysisResult, GroundingSummary, Plan, PlanStep, Summary, TraceStep
-from .prompts import EXPLAIN_V1, ORCH_PLAN_V1, PROMPT_VERSION, TOOL_HINTS
+from .models import MAX_STEPS, AnalysisResult, GroundingSummary, HeadlineSummary, Plan, PlanStep, TraceStep
+from .prompts import ORCH_PLAN_V1, PROMPT_VERSION, TOOL_HINTS
 
 log = logging.getLogger("guidestone.agent")
 RUN_TIMEOUT_S = 30.0
@@ -48,7 +48,7 @@ class _State:
     seen: set[str] = field(default_factory=set)          # (tool, canonical args) already computed
     raw: dict[str, Any] = field(default_factory=dict)    # formula results as objects, for the fact sheet
     facts: dict | None = None
-    summary: Summary | None = None
+    summary: HeadlineSummary | None = None
     degraded: bool = False
     llm_trace: list[dict] = field(default_factory=list)
 
@@ -97,20 +97,12 @@ async def precompute(st: _State) -> None:
 
 # ---- facts ---------------------------------------------------------------------------------------------------------------------
 
-def _usd(x: float) -> str:
-    return f"${abs(x):,.0f}"
-
-
 def build_facts(st: _State) -> dict:
-    """The forecast fact sheet (labels, overall_status) plus the dashboard facts, and display strings for the key amounts."""
+    """The forecast fact sheet (labels, overall_status) plus the dashboard facts. The model sees llm.facts.model_view(facts), not this."""
     facts = forecast_facts(st.raw["forecast_liquid_summary"])
     p2p = st.raw["paycheck_to_paycheck"]
     facts["paycheck_to_paycheck"] = "yes" if p2p.flag else "no"
     facts["employment"] = st.profile.employment
-    facts["display"] = {k: v for k, v in {
-        "start_balance": _usd(facts["start_balance"]), "monthly_gain": f"{_usd(facts['monthly_gain'])} a month",
-        "lowest_point": _usd(facts["low_point"]["amount"]), "cushion": _usd(facts["cushion"]),
-        "balance_at_end": _usd(facts["end_balance"]["p50"]) if "end_balance" in facts else None}.items() if v}
     return facts
 
 
@@ -194,20 +186,20 @@ async def execute(st: _State, steps: list[tuple[PlanStep, Tool, dict]]) -> None:
 
 # ---- explain -------------------------------------------------------------------------------------------------------------------
 
-def _template_summary(st: _State) -> Summary:
+def _template_summary(st: _State) -> HeadlineSummary:
     text = grounding.template(st.facts)
-    rep = grounding.check(text, st.facts, judgments=True)
-    return Summary(text=text, source="template", grounding=GroundingSummary(ok=rep.ok, checked=len(rep.numbers), retried=False))
+    rep = grounding.check(text, st.facts, judgments=True, style=True)
+    return HeadlineSummary(text=text, source="template", grounding=GroundingSummary(ok=rep.ok, checked=len(rep.numbers), retried=False))
 
 
 async def explain(st: _State) -> None:
-    messages = [{"role": "system", "content": EXPLAIN_V1 + FACTS_PROMPT},
-                {"role": "user", "content": "Facts:\n" + json.dumps(st.facts, separators=(",", ":"))}]
+    messages = [{"role": "system", "content": EXPLAIN_PROMPT}, {"role": "user", "content": model_view(st.facts)}]
     t0 = time.perf_counter()
     try:
-        out = await grounding.explain("presenter", messages, st.facts, context_numbers=(12, 24), max_tokens=EXPLAIN_MAX_TOKENS)
-        st.summary = Summary(text=out.text, source="template" if out.used_template else "model", hint=out.parsed.next_step_hint,
-                             grounding=GroundingSummary(ok=out.report.ok, checked=len(out.report.numbers), retried=out.retried))
+        out = await grounding.explain("presenter", messages, st.facts, context_numbers=(12, 24), placeholders=placeholders(st.facts),
+                                      max_tokens=EXPLAIN_MAX_TOKENS)
+        st.summary = HeadlineSummary(text=out.text, source="template" if out.used_template else "model",
+                                     grounding=GroundingSummary(ok=out.report.ok, checked=len(out.report.numbers), retried=out.retried))
         st.trace.append(TraceStep(kind="explain", name="presenter", ms=round((time.perf_counter() - t0) * 1000, 1),
                                   detail={"retried": out.retried, "template": out.used_template, "checked": len(out.report.numbers)}))
         if out.used_template:
