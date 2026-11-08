@@ -14,22 +14,25 @@ export const SEGMENT_LABEL: Record<Segment, string> = { compact_suv: "Compact SU
 export const PRIORITY_LABEL: Record<Priority, string> = { mpg: "Fuel economy", safety: "Safety", price: "Price" };
 export const PRIORITIES: Priority[] = ["mpg", "safety", "price"];
 export const VERDICT_LABEL: Record<BuyVerdict, string> = { affordable: "Affordable", stretch: "A stretch", not_now: "Not right now" };
-export const FIGURE_LABEL: Record<string, string> = { msrp: "Starting price", mpg_combined: "MPG (combined)", nhtsa_stars: "NHTSA safety stars", iihs_award: "IIHS award" };
-export const FIGURES = ["msrp", "mpg_combined", "nhtsa_stars", "iihs_award"];
+export const FIGURE_LABEL: Record<string, string> = { msrp: "Starting price", model_year: "Model year", mpg_combined: "MPG (combined)", nhtsa_stars: "NHTSA safety stars", iihs_award: "IIHS award" };
+export const FIGURES = ["msrp", "model_year", "mpg_combined", "nhtsa_stars", "iihs_award"];
 export const LOAN_TERM_MONTHS = 60;
 
-export type Source = { figure: string; title: string; fetchedAt: string; url: string };
-export type Pick = { id: string; name: string; why: string; sources: Source[] };
+export type Figure = { value: number | string | null; source: { title: string; fetchedAt: string; url: string } | null };
+export type Pick = { id: string; name: string; why: string; figures: Record<string, Figure> };
 export type PlanRow = {
   code: string; name: string; down: number; loan: number; monthly: number; totalInterest: number; lowestCash: number; monthsBelow: number;
-  cashAfter: number; chips: string[]; recommended: boolean; sameAsCash: boolean;
+  cashAfter: number; chips: string[]; recommended: boolean; sameAsCash: boolean; cushionFloor: number;
 };
+export type BandPoint = { t: number; p10: number; p50: number; p90: number };
 export type BuyView = {
-  verdict: BuyVerdict; answer: string; choiceId: string;
+  noOptions: boolean;
+  verdict: BuyVerdict | null; answer: string; choiceId: string;
   query: { segment: Segment; budgetBand: number | null; priorities: Priority[] };
   picks: Pick[];
-  car: { name: string; price: number; apr: number; creditTier: string; savingsRate: number };
+  car: { name: string; price: number; apr: number; creditTier: string; savingsRate: number; aprSource: { title: string; fetchedAt: string; url: string } } | null;
   plans: PlanRow[]; recommended: string;
+  bands: { baseline: BandPoint[]; scenario: BandPoint[] } | null;     // cash with and without the purchase, for the recommended plan
 };
 
 const chips = (p: Plan): string[] => {
@@ -38,22 +41,30 @@ const chips = (p: Plan): string[] => {
   if (!p.cushion_holds) c.push("Cash dips below cushion");
   return c;
 };
+const ref = (s: { source_title: string; fetched_at: string; url: string }) => ({ title: s.source_title, fetchedAt: s.fetched_at, url: s.url });
+const day = (iso: string) => { const [y, m, d] = iso.slice(0, 10).split("-").map(Number); return new Date(y, m - 1, d).getTime(); };
 
 export function toBuyView(b: BuyAnalysis): BuyView {
+  const query = { segment: b.query.segment, budgetBand: b.query.budget_band ?? null, priorities: b.query.priorities ?? [] };
   const pl = b.plans;
-  // no_options (nothing fits the segment and budget) has no plans or chosen car: the page has no screen for it yet, so it takes its failed state
-  if (b.no_options || !pl || !b.verdict || !b.chosen) throw new Error("no options");
+  if (b.no_options || !pl || !b.verdict) {
+    return { noOptions: true, verdict: null, answer: b.answer.text, choiceId: "", query, picks: [], car: null, plans: [], recommended: "", bands: null };
+  }
   const order = ["cash", "finance", "mix"];
+  const pt = (m: { day: string; p10: number; p50: number; p90: number }): BandPoint => ({ t: day(m.day), p10: m.p10, p50: m.p50, p90: m.p90 });
   return {
-    verdict: b.verdict, answer: b.answer.text, choiceId: b.chosen,
-    query: { segment: b.query.segment, budgetBand: b.query.budget_band ?? null, priorities: b.query.priorities ?? [] },
-    picks: b.picks.map((p) => ({ id: p.id, name: p.name, why: p.why_text, sources: p.sources.map((s) => ({ figure: s.figure, title: s.source_title, fetchedAt: s.fetched_at, url: s.url })) })),
-    car: { name: pl.vehicle_name, price: pl.price, apr: pl.loan_apr, creditTier: pl.credit_tier, savingsRate: pl.savings_rate },
+    noOptions: false, verdict: b.verdict, answer: b.answer.text, choiceId: b.chosen ?? "", query,
+    picks: b.picks.map((p) => ({
+      id: p.id, name: p.name, why: p.why_text,
+      figures: Object.fromEntries(Object.entries(p.figures).map(([k, f]) => [k, { value: f.value ?? null, source: f.source ? ref(f.source) : null }])),
+    })),
+    car: { name: pl.vehicle_name, price: pl.price, apr: pl.loan_apr, creditTier: pl.credit_tier, savingsRate: pl.savings_rate, aprSource: ref(pl.apr_source) },
     recommended: pl.recommended,
-    plans: Object.values(pl.plans).sort((a, b2) => order.indexOf(a.code) - order.indexOf(b2.code)).map((p) => ({
+    plans: Object.values(pl.plans).sort((a, c) => order.indexOf(a.code) - order.indexOf(c.code)).map((p) => ({
       code: p.code, name: p.name, down: p.down_payment, loan: p.loan_amount, monthly: p.monthly_payment, totalInterest: p.total_interest,
       lowestCash: p.cushion.min_p10, monthsBelow: p.cushion.months_p10_below_cushion, cashAfter: p.cash_after, chips: chips(p),
-      recommended: p.code === pl.recommended, sameAsCash: p.same_as_cash ?? false,
+      recommended: p.code === pl.recommended, sameAsCash: p.same_as_cash ?? false, cushionFloor: p.cushion_floor,
     })),
+    bands: pl.baseline_monthly?.length && pl.scenario_monthly?.length ? { baseline: pl.baseline_monthly.map(pt), scenario: pl.scenario_monthly.map(pt) } : null,
   };
 }

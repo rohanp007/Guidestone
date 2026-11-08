@@ -17,7 +17,7 @@ function Body() {
   const { view } = b;
   // the window lists agents in the order they work on a purchase: Orchestrator, Researcher, Compute, Advisor
   const agent: AgentActivityHandle = useMemo(() => ({ ...b.agent, activity: { ...b.agent.activity, rows: [...b.agent.activity.rows].sort((x, y) => ORDER.indexOf(x.agent) - ORDER.indexOf(y.agent)) } }), [b.agent]);
-  const noOptions = !!view && view.picks.length === 0;
+  const noOptions = !!view && (view.noOptions || view.picks.length === 0);
 
   return (
     <div className="fade-in py-8 sm:py-10">
