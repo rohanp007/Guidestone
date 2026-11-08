@@ -220,7 +220,7 @@ def test_cushion_impact_uses_the_same_baseline_for_every_strategy(real):
 def test_simulate_scenario_result_shapes(real):
     full = sm.simulate_scenario(real["C067"], payoff_strategy="D")
     assert len(full.baseline_monthly) == len(full.scenario_monthly) == 6
-    assert set(full.diff.model_dump()) == {"end_p50", "min_p10", "overdraft_prob", "cushion_prob", "months_below_cushion"}
+    assert set(full.diff.model_dump()) == {"end_p50", "min_p10", "overdraft_prob", "cushion_prob", "months_p10_below_cushion"}
     assert full.plan.amortization.schedule
     out = json.dumps(sm.simulate_scenario_summary(real["C067"], payoff_strategy="D").model_dump(mode="json"))
     for banned in ("schedule", "baseline_monthly", "scenario_monthly", "p90", "balances"):

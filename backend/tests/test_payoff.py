@@ -160,9 +160,19 @@ def test_c067_single_card(real):
     ci = d.cushion_impact
     assert ci.scenario.min_p10 >= 1 * ess
     assert "tradeoff_low_cushion" in r.flags
+    w = {w.code: w for w in d.warnings}["tradeoff_low_cushion"]                # D dips under the 3-month target, not under the 1-month floor
+    assert w.limit == pytest.approx(1 * ess, abs=0.01) and w.amount == pytest.approx(ci.scenario.min_p10, abs=0.01)
+    assert f"months_p10_below_cushion={ci.scenario.months_p10_below_cushion}" in w.detail and f"{ci.scenario.min_p10:,.2f}" in w.detail
+    # same basis for the count and the minimum: month-end p10. C dips $7 under the target (10,504 vs 10,511): counted, but not material
+    assert all("tradeoff_low_cushion" not in {x.code for x in r.strategies[c].warnings} for c in "ABCE")
+    c_ci = r.strategies["C"].cushion_impact
+    assert 0 < c_ci.cushion - c_ci.scenario.min_p10 < 100 and c_ci.scenario.months_p10_below_cushion == 1
+    assert d.cushion_impact.cushion - d.cushion_impact.scenario.min_p10 > max(100, 0.02 * d.cushion_impact.cushion)
+    for c, s in r.strategies.items():
+        assert (s.cushion_impact.scenario.months_p10_below_cushion > 0) == (s.cushion_impact.scenario.min_p10 < s.cushion_impact.cushion)
     assert ci.cushion == pytest.approx(3 * ess)
     assert ci.scenario.min_p10 < ci.baseline.min_p10                          # the lump sum costs cash
-    assert ci.scenario.months_below_cushion > 0
+    assert ci.scenario.months_p10_below_cushion > 0
 
 
 def test_c059_auto_loan_pays_off_within_two_to_four_months(real):
@@ -172,7 +182,13 @@ def test_c059_auto_loan_pays_off_within_two_to_four_months(real):
     assert a.months_saved_vs_minimum > 0 and a.interest_saved_vs_minimum > 0
     assert r.strategies["E"].amortization.months_to_payoff == 3
     assert r.recommended.code == "D"
-    assert "lump_unused" in {w.code for w in r.strategies["D"].warnings}      # the safe lump sum is more than the loan
+    loan = real["C059"].accounts_of("auto_loan")[0].balance
+    for c in "CD":                                                            # the safe lump sum is more than the loan
+        s = r.strategies[c]
+        w = {w.code: w for w in s.warnings}
+        assert s.safe_lump_sum == r.safe_lump_sum > loan and s.lump_applied == pytest.approx(loan, abs=0.01)
+        assert w["lump_exceeds_debt"].unused_amount == pytest.approx(s.lump_sum - loan, abs=0.01)
+        assert "lump_unused" not in w and "exceeds_safe_lump" not in w          # applied (the loan) is under the safe lump sum
 
 
 @pytest.mark.parametrize("pid", ["C095", "C010"])
@@ -206,7 +222,7 @@ def test_comparison_rows(real):
     for row in r.comparison:
         s = r.strategies[row.code]
         assert (row.months, row.total_interest, row.interest_saved) == (s.amortization.months_to_payoff, s.amortization.total_interest, s.interest_saved_vs_minimum)
-        assert row.cushion_min_p10 == s.cushion_impact.scenario.min_p10 and row.months_below_cushion == s.cushion_impact.scenario.months_below_cushion
+        assert row.cushion_min_p10 == s.cushion_impact.scenario.min_p10 and row.months_p10_below_cushion == s.cushion_impact.scenario.months_p10_below_cushion
 
 
 def test_the_agent_summary_has_no_schedules_or_bands(real):
@@ -238,3 +254,38 @@ def test_api_round_trip(pid):
         assert r.status_code == 200, (name, r.text[:200])
     bad = c.post(f"/api/profiles/{pid}/formulas/simulate_payoff", json={"strategy": "F", "order": ["nope"]})
     assert bad.status_code == 422 or pid == "C095"
+
+
+def test_exceeds_safe_lump_fires_on_the_lump_applied_not_the_lump_asked_for(real):
+    c059 = P.payoff_strategies(real["C059"], lump_sum=50_000)                  # asks for far more than the loan, and than the safe lump sum
+    codes = {w.code for w in c059.strategies["D"].warnings}
+    assert "lump_exceeds_debt" in codes and "exceeds_safe_lump" not in codes   # only the loan's balance is applied, under the safe amount
+    c067 = P.payoff_strategies(real["C067"], lump_sum=14_000)                  # the whole card: more than safe, so applied > safe
+    w = {w.code: w for w in c067.strategies["D"].warnings}["exceeds_safe_lump"]
+    assert w.amount == pytest.approx(c067.strategies["D"].lump_applied - c067.safe_lump_sum, abs=0.01)
+
+
+def test_the_cent_rounding_rule_is_the_same_in_every_strategy(real):
+    """$222.44/mo on $10,000 at 12% leaves 37 cents: paid in month 60 in E and in any strategy that never touches it."""
+    import dataclasses
+    ctx = P.make_context(real["C067"])
+    ln = D.Debt(id="L", kind="loan", apr=0.12, balance=10000.0, fixed_min=222.44)
+    ctx = dataclasses.replace(ctx, debts=[ln], minimum=D.amortize([ln], 0.0, ["L"]), extra=0.0, lump=0.0, extra_given=True)
+    assert ctx.minimum.months_to_payoff == 60
+    for code in "ABCDE":
+        assert P._plan(ctx, code, None)[0].months_to_payoff == 60, code
+    assert D.amortize([D.Debt(id="L", kind="loan", apr=0.12, balance=10000.0, fixed_min=222.0)], 0, ["L"]).months_to_payoff == 61    # not forgiven
+
+
+def test_c059_minimum_only_is_three_months_because_the_residual_is_not_rounding(real):
+    e = P.payoff_strategies(real["C059"]).strategies["E"].amortization
+    assert e.months_to_payoff == 3 and 0.05 < e.schedule[1].balances["A-C059-AUTO_LOAN"] < 0.5      # 11 cents left after month 2
+
+
+def test_simulate_payoff_defaults_to_the_recommended_strategy(real):
+    from app.engine import simulate as sm
+    assert sm.simulate_payoff(real["C067"]).strategy.code == "D" == P.payoff_strategies(real["C067"]).recommended.code
+    assert sm.simulate_payoff(real["C067"], strategy="A").strategy.code == "A"
+    no_surplus = real["C067"].model_copy(update={"summary": real["C067"].summary.model_copy(update={"monthly_surplus": -1.0})})
+    assert sm.simulate_payoff(no_surplus, lump_sum=0).strategy.code == "E"     # the recommendation, whatever it is
+    assert sm.simulate_payoff(real["C010"]).no_debt

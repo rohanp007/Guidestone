@@ -38,9 +38,10 @@ Code = Literal["A", "B", "C", "D", "E", "F"]
 # ---- result models (the simulation summaries live here so engine/simulate.py can import them without a cycle) ------------------------
 
 class PayoffWarning(Base):
-    code: str                                 # exceeds_safe_lump, never_pays_off, hit_max_months, no_surplus, lump_unused, keep_cash_earns_more, ...
+    code: str                                 # exceeds_safe_lump, lump_exceeds_debt, tradeoff_low_cushion, never_pays_off, hit_max_months, no_surplus, ...
     amount: float | None = None
     limit: float | None = None
+    unused_amount: float | None = None        # lump_exceeds_debt: the part of the lump sum the debts could not take
     accounts: list[str] = Field(default_factory=list)
     detail: str = ""
 
@@ -50,7 +51,7 @@ class SimSummary(Base):
     min_p10: float                            # lowest month-end p10 (the pessimistic band) in the window
     overdraft_prob: float                     # probability of dropping below $0 at some point
     cushion_prob: float                       # ...below the cushion target
-    months_below_cushion: int                 # month ends where the median is below the cushion target
+    months_p10_below_cushion: int                 # month ends where the p10 band (the same one min_p10 is the lowest of) is below the cushion target
 
 
 class SimDiff(Base):
@@ -58,7 +59,7 @@ class SimDiff(Base):
     min_p10: float
     overdraft_prob: float
     cushion_prob: float
-    months_below_cushion: int
+    months_p10_below_cushion: int
 
 
 class CushionImpact(Base):
@@ -75,7 +76,9 @@ class StrategyResult(Base):
     name: str
     order: list[str]
     extra_monthly: float
-    lump_sum: float
+    lump_sum: float                           # the lump sum asked for / resolved
+    lump_applied: float                       # what the debts could take (never more than they owe)
+    safe_lump_sum: float                      # rules.py's safe lump sum, for comparison
     amortization: Amortization
     interest_saved_vs_minimum: float          # vs E (E's interest is a lower bound when E is capped: see minimum_only_capped)
     months_saved_vs_minimum: int | None
@@ -91,7 +94,7 @@ class ComparisonRow(Base):
     total_interest: float
     interest_saved: float
     cushion_min_p10: float | None
-    months_below_cushion: int | None
+    months_p10_below_cushion: int | None
 
 
 class Recommendation(Base):
@@ -130,8 +133,8 @@ class StrategySummary(Base):
     months_saved: int | None
     cushion_min_p10: float | None
     cushion_min_p10_diff: float | None
-    months_below_cushion: int | None
-    months_below_cushion_diff: int | None
+    months_p10_below_cushion: int | None
+    months_p10_below_cushion_diff: int | None
     warnings: list[PayoffWarning]
 
 
@@ -174,6 +177,7 @@ class Context:
     priority: rules.PayoffPriority
     minimum: Amortization                     # strategy E
     safe_savings_rate: float
+    low_floor: float | None                   # cash floor for lump sums when the card exception applies (low_cushion_months of essentials)
 
 
 def make_context(profile: Profile, *, extra_monthly: float | None = None, lump_sum: float | None = None, include_mortgage: bool = False,
@@ -184,7 +188,9 @@ def make_context(profile: Profile, *, extra_monthly: float | None = None, lump_s
     lump = pp.safe_lump_sum if lump_sum is None else lump_sum
     minimum = amortize(debts, 0.0, avalanche_order(debts), rollover=rollover)
     return Context(profile, debts, include_mortgage, rollover, pp.extra_monthly_applied, extra_monthly is not None, lump, pp.safe_lump_sum,
-                   pp, minimum, load_assumptions()["safe_savings_rate"]["value"])
+                   pp, minimum, load_assumptions()["safe_savings_rate"]["value"],
+                   None if pp.safe_lump_sum_low_cushion is None else
+                   load_assumptions()["low_cushion_months"]["value"] * fc.essential_monthly(profile))
 
 
 def validate_order(debts: list[Debt], order: list[str]) -> list[str]:
@@ -219,11 +225,12 @@ def _plan(ctx: Context, code: str, order: list[str] | None) -> tuple[Amortizatio
 
 def _warnings(ctx: Context, am: Amortization, extra: float, lump: float, uses_extra: bool) -> list[PayoffWarning]:
     out: list[PayoffWarning] = []
-    if lump > ctx.safe_lump + 0.005:
-        out.append(PayoffWarning(code="exceeds_safe_lump", amount=round(lump - ctx.safe_lump, 2), limit=round(ctx.safe_lump, 2),
-                                 detail="over the lump sum that keeps the cushion floor"))
+    if am.lump_applied > ctx.safe_lump + 0.005:
+        out.append(PayoffWarning(code="exceeds_safe_lump", amount=round(am.lump_applied - ctx.safe_lump, 2), limit=round(ctx.safe_lump, 2),
+                                 detail="the lump sum applied is over the amount that keeps the cushion floor"))
     if lump - am.lump_applied > 0.005:
-        out.append(PayoffWarning(code="lump_unused", amount=round(lump - am.lump_applied, 2), detail="more than the debts owe; the rest stays in cash"))
+        out.append(PayoffWarning(code="lump_exceeds_debt", unused_amount=round(lump - am.lump_applied, 2), limit=round(ctx.safe_lump, 2),
+                                 detail=f"lump sum {lump:,.2f} (safe lump sum {ctx.safe_lump:,.2f}) but the debts take only {am.lump_applied:,.2f}; the rest stays in cash"))
     if uses_extra and not ctx.extra_given and ctx.extra <= 0:                    # nothing to put toward the debt each month
         out.append(PayoffWarning(code="no_surplus"))
     if am.never_pays_off:
@@ -245,14 +252,25 @@ def _result(ctx: Context, code: str, order: list[str] | None, baseline=None, *, 
     E = ctx.minimum
     e_months = E.months_to_payoff if E.months_to_payoff is not None else E.max_months       # a capped E counts as max_months
     result = StrategyResult(
-        code=code, name=CODES[code], order=am.order, extra_monthly=round(extra, 2), lump_sum=round(lump, 2), amortization=am,
+        code=code, name=CODES[code], order=am.order, extra_monthly=round(extra, 2), lump_sum=round(lump, 2), lump_applied=am.lump_applied,
+        safe_lump_sum=round(ctx.safe_lump, 2), amortization=am,
         interest_saved_vs_minimum=round(E.total_interest - am.total_interest, 2),
         months_saved_vs_minimum=None if am.months_to_payoff is None else e_months - am.months_to_payoff,
         warnings=_warnings(ctx, am, extra, lump, code in "ABDF"))
     if cushion and ctx.debts:
         from ..engine import simulate as sim                  # imported here: simulate imports this module for the models above
         base = baseline or sim.make_baseline(ctx.profile, days=days, paths=paths)
-        result = result.model_copy(update={"cushion_impact": sim.cushion_impact(ctx.profile, am, base)})
+        ci = sim.cushion_impact(ctx.profile, am, base)
+        floor = ctx.low_floor if ctx.low_floor is not None else ci.cushion      # the lowest cash the rules allow
+        A = load_assumptions()
+        material = max(A["cushion_warn_min_shortfall"]["value"], A["cushion_warn_min_shortfall_pct"]["value"] * ci.cushion)
+        shortfall = ci.cushion - ci.scenario.min_p10                    # months_p10_below_cushion stays the raw count; the warning needs a real dip
+        if shortfall > material and ci.scenario.min_p10 >= floor:
+            result.warnings.append(PayoffWarning(
+                code="tradeoff_low_cushion", amount=round(ci.scenario.min_p10, 2), limit=round(floor, 2),
+                detail=f"months_p10_below_cushion={ci.scenario.months_p10_below_cushion}, cushion_min_p10={ci.scenario.min_p10:,.2f}; "
+                       f"below the {ci.cushion:,.2f} cushion target but not below the {floor:,.2f} floor"))
+        result = result.model_copy(update={"cushion_impact": ci})
     return result
 
 
@@ -294,7 +312,7 @@ def payoff_strategies(profile: Profile, *, extra_monthly: float | None = None, l
         ci = r.cushion_impact
         rows.append(ComparisonRow(code=c, name=r.name, months=r.amortization.months_to_payoff, total_interest=r.amortization.total_interest,
                                   interest_saved=r.interest_saved_vs_minimum, cushion_min_p10=ci.scenario.min_p10 if ci else None,
-                                  months_below_cushion=ci.scenario.months_below_cushion if ci else None))
+                                  months_p10_below_cushion=ci.scenario.months_p10_below_cushion if ci else None))
     return PayoffStrategies(**head, strategies=results, comparison=rows, recommended=recommend(ctx), snowball_extra_cost=cost,
                             cushion=base.cushion, paths=base.paths, runtime_ms=round(1000 * (time.perf_counter() - started), 1))
 
@@ -304,8 +322,8 @@ def summarize_strategy(r: StrategyResult) -> StrategySummary:
     return StrategySummary(code=r.code, name=r.name, months=am.months_to_payoff, payoff_date=am.payoff_date.isoformat() if am.payoff_date else None,
                            total_interest=am.total_interest, interest_saved=r.interest_saved_vs_minimum, months_saved=r.months_saved_vs_minimum,
                            cushion_min_p10=ci.scenario.min_p10 if ci else None, cushion_min_p10_diff=ci.diff.min_p10 if ci else None,
-                           months_below_cushion=ci.scenario.months_below_cushion if ci else None,
-                           months_below_cushion_diff=ci.diff.months_below_cushion if ci else None, warnings=r.warnings)
+                           months_p10_below_cushion=ci.scenario.months_p10_below_cushion if ci else None,
+                           months_p10_below_cushion_diff=ci.diff.months_p10_below_cushion if ci else None, warnings=r.warnings)
 
 
 def plan_for_scenario(profile: Profile, *, strategy: str | None, extra_monthly: float | None, lump_sum: float | None,

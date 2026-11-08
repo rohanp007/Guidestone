@@ -165,7 +165,7 @@ def make_baseline(profile: Profile, days: int = 180, paths: int | None = None, s
 def summarize(lf: LiquidForecast, cushion: float) -> SimSummary:
     months = lf.monthly or []
     return SimSummary(end_p50=months[-1].p50, min_p10=min(m.p10 for m in months), overdraft_prob=lf.overdraft_risk.probability,
-                      cushion_prob=lf.cushion_risk.probability, months_below_cushion=sum(m.p50 < cushion for m in months))
+                      cushion_prob=lf.cushion_risk.probability, months_p10_below_cushion=sum(m.p10 < cushion for m in months))
 
 
 def diff(a: SimSummary, b: SimSummary) -> SimDiff:
@@ -252,7 +252,7 @@ def simulate_scenario_summary(profile: Profile, **kw) -> SimulationSummary:
 
 
 class SimulatePayoffArgs(Base):
-    strategy: payoff.Code = Field("A", description="A avalanche, B snowball, C lump sum then minimums, D lump sum then avalanche, E minimums only, F custom")
+    strategy: payoff.Code | None = Field(None, description="Omit to use the recommended strategy (A if none). A avalanche, B snowball, C lump sum then minimums, D lump sum then avalanche, E minimums only, F custom")
     extra_monthly: float | None = Field(None, ge=0, description="Extra per month on top of minimums; omit to use the monthly surplus, 0 means none")
     lump_sum: float | None = Field(None, ge=0, description="One-time payment from cash at month 0; omit to use the safe lump sum, 0 means none")
     order: list[str] | None = Field(None, description="Account ids in the order extra money should go (strategy F)")
@@ -264,13 +264,14 @@ class PayoffSimulation(Base):
     simulation: SimulationResult | None = None
 
 
-def simulate_payoff_run(profile: Profile, *, strategy: str, extra_monthly: float | None = None, lump_sum: float | None = None,
+def simulate_payoff_run(profile: Profile, *, strategy: str | None = None, extra_monthly: float | None = None, lump_sum: float | None = None,
                         order: list[str] | None = None, include_mortgage: bool = False) -> PayoffSimulation:
     # a mortgage the caller names in `order` is an explicit request to pay it
     include_mortgage = include_mortgage or any(a.type == "mortgage" and a.id in (order or []) for a in profile.accounts)
     ctx = payoff.make_context(profile, extra_monthly=extra_monthly, lump_sum=lump_sum, include_mortgage=include_mortgage)
     if not ctx.debts:
         return PayoffSimulation(no_debt=True)
+    strategy = strategy or payoff.recommend(ctx).code or "A"           # the recommended strategy, A if there is none
     base = make_baseline(profile)
     result = payoff._result(ctx, strategy, order, base)
     sim = simulate(profile, Scenario(), schedule=result.amortization, baseline=base)
@@ -278,7 +279,7 @@ def simulate_payoff_run(profile: Profile, *, strategy: str, extra_monthly: float
 
 
 @register("simulate_payoff", args=SimulatePayoffArgs, result=PayoffSimulation, category="simulate")
-def simulate_payoff(profile: Profile, *, strategy: str, extra_monthly: float | None = None, lump_sum: float | None = None,
+def simulate_payoff(profile: Profile, *, strategy: str | None = None, extra_monthly: float | None = None, lump_sum: float | None = None,
                     order: list[str] | None = None) -> PayoffSimulation:
     """One payoff strategy in detail: its month-by-month schedule, and the liquid-cash forecast with its payments against the forecast
     as it stands (month-end bands for charts). Full result."""

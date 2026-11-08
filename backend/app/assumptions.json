@@ -173,5 +173,15 @@
     "value": 360,
     "source": "Design choice: payoff simulations stop after 30 years; a plan that has not cleared the debt by then is reported as not paying off (a minimum-only card can take longer).",
     "as_of": "2026-11-08"
+  },
+  "cushion_warn_min_shortfall": {
+    "value": 100,
+    "source": "Design choice for the payoff simulator: a tradeoff_low_cushion warning needs the p10 shortfall below the cushion target to exceed the larger of this many dollars and cushion_warn_min_shortfall_pct of the target, so a dip of a few dollars does not raise a warning. months_p10_below_cushion still reports the raw count.",
+    "as_of": "2026-11-08"
+  },
+  "cushion_warn_min_shortfall_pct": {
+    "value": 0.02,
+    "source": "Design choice, the percentage half of cushion_warn_min_shortfall: 2% of the cushion target.",
+    "as_of": "2026-11-08"
   }
 }
