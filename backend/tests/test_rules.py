@@ -402,5 +402,11 @@ def test_verdict_rules():
     assert rules.verdict(thin, "on_track") == "act_now"                       # investments cover far fewer than 12 months
     assert rules.verdict(make([checking(1500.0)], surplus=500.0), "on_track") == "plan_ahead"      # step 4 open
     assert rules.verdict(make([checking(400.0)], surplus=500.0), "on_track") == "act_now"          # step 1 open
-    assert rules.verdict(make([checking(10000.0)], surplus=500.0, retirement=None), "watch") in ("plan_ahead", "act_now")
     assert rules.verdict(make([checking(10000.0), card("C", 5000, 0.25)], surplus=500.0), "on_track") == "act_now"   # step 3
+    steady = make([checking(7000.0)], surplus=500.0)                                  # steps 1-4 done, retirement (step 5) still open
+    assert rules.priority_waterfall(steady).first_open_step == 5
+    assert rules.verdict(steady, "on_track") == "plan_ahead"                          # step 5
+    assert rules.verdict(steady, "watch") == "plan_ahead" and rules.verdict(steady, "at_risk") == "act_now"
+    done = make([checking(7000.0)], surplus=500.0, retirement=RetirementInfo(has_401k=True, employer_match_pct=0.5))
+    assert rules.priority_waterfall(done).first_open_step in (7, None)                # nothing earlier is open
+    assert rules.verdict(done, "on_track") == "on_track" and rules.verdict(done, "watch") == "plan_ahead"

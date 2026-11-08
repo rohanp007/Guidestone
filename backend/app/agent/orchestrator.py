@@ -25,13 +25,13 @@ from ..llm import client, grounding
 from ..llm.facts import forecast_facts, model_view, placeholders
 from ..llm.prompts import EXPLAIN_PROMPT
 from ..llm.tools import Tool, session_tool
-from . import cache
+from . import advisor, cache
 from .events import EventSpec, get_event
-from .models import MAX_STEPS, AnalysisResult, GroundingSummary, HeadlineSummary, Plan, PlanStep, TraceStep
+from .models import MAX_STEPS, Advice, AnalysisResult, GroundingSummary, HeadlineSummary, Plan, PlanStep, TraceStep
 from .prompts import ORCH_PLAN_V1, PROMPT_VERSION, TOOL_HINTS
 
 log = logging.getLogger("guidestone.agent")
-RUN_TIMEOUT_S = 30.0
+RUN_TIMEOUT_S = 45.0
 PLAN_MAX_TOKENS = 200
 EXPLAIN_MAX_TOKENS = 200
 
@@ -49,6 +49,8 @@ class _State:
     raw: dict[str, Any] = field(default_factory=dict)    # formula results as objects, for the fact sheet
     facts: dict | None = None
     summary: HeadlineSummary | None = None
+    rules: advisor.Inputs | None = None                  # the decision rules' output (waterfall, candidate moves, verdict)
+    advice: Advice | None = None
     degraded: bool = False
     llm_trace: list[dict] = field(default_factory=list)
 
@@ -211,23 +213,61 @@ async def explain(st: _State) -> None:
                                   detail={"reason": type(e).__name__}))
 
 
+# ---- rules and advice ----------------------------------------------------------------------------------------------------------
+
+async def run_rules(st: _State) -> None:
+    """The decision rules (waterfall, candidate moves, verdict): formulas only, no model. A failure is a bug and fails the run."""
+    inputs, ok = await _timed(st, "rules", "decision_rules", asyncio.to_thread(advisor.prepare, st.profile, st.facts))
+    if not ok:
+        raise inputs
+    st.rules = inputs
+    st.compute["priority_waterfall"] = to_plain(inputs.waterfall)
+    st.compute["candidate_moves"] = to_plain(inputs.moves)
+    st.trace[-1].detail |= {"verdict": inputs.verdict, "candidates": len(inputs.candidates)}
+
+
+async def advise(st: _State) -> None:
+    t0 = time.perf_counter()
+    try:
+        st.advice = await advisor.advise(st.rules, st.facts)
+        detail = {"source": st.advice.source, "moves": len(st.advice.moves), "retried": st.advice.grounding.retried}
+        st.trace.append(TraceStep(kind="advise", name="advisor", ms=round((time.perf_counter() - t0) * 1000, 1), detail=detail))
+        if st.advice.source != "model":
+            st.degraded = True
+    except Exception as e:                                  # the advisor must never take the dashboard down
+        st.degraded = True
+        st.advice = advisor.template_advice(st.rules)
+        st.trace.append(TraceStep(kind="fallback", name="advise", ms=round((time.perf_counter() - t0) * 1000, 1), ok=False,
+                                  detail={"reason": type(e).__name__}))
+
+
 # ---- the run -------------------------------------------------------------------------------------------------------------------
 
 def _assemble(st: _State, data_version: str) -> AnalysisResult:
     return AnalysisResult(
         run_id=st.run_id, event=st.spec.name, feature=st.spec.feature, customer_id=st.profile.id, as_of=st.profile.as_of_date.isoformat(),
         prompt_version=PROMPT_VERSION, data_version=data_version, inputs=st.inputs, compute=st.compute, facts=st.facts or {},
-        status=(st.facts or {}).get("overall_status"), summary=st.summary, trace=st.trace, llm_trace=st.llm_trace, degraded=st.degraded)
+        status=(st.facts or {}).get("overall_status"), summary=st.summary, advice=st.advice, trace=st.trace, llm_trace=st.llm_trace, degraded=st.degraded)
 
 
 async def _pipeline(st: _State) -> None:
     st.llm_trace = client.start_run()
     await precompute(st)
     st.facts = build_facts(st)
-    steps = await plan_steps(st)
-    await execute(st, steps)
-    if st.spec.explain:
-        await explain(st)
+    rules_task = asyncio.create_task(run_rules(st)) if st.spec.advise else None      # formulas only: overlaps the planner
+    try:
+        steps = await plan_steps(st)
+        await execute(st, steps)
+        writers = []                                       # the presenter (:1235) and the advisor (:1234) are different servers: in parallel
+        if st.spec.explain:
+            writers.append(explain(st))
+        if rules_task is not None:
+            await rules_task
+            writers.append(advise(st))
+        await asyncio.gather(*writers)
+    finally:
+        if rules_task is not None and not rules_task.done():
+            rules_task.cancel()
 
 
 async def _execute(st: _State, data_version: str) -> AnalysisResult:
@@ -241,6 +281,10 @@ async def _execute(st: _State, data_version: str) -> AnalysisResult:
         st.trace.append(TraceStep(kind="fallback", name="timeout", ok=False, detail={"limit_s": RUN_TIMEOUT_S}))
         if st.spec.explain and st.summary is None:
             st.summary = _template_summary(st)
+        if st.spec.advise and st.advice is None:
+            if st.rules is None:                            # the rules did not finish either: compute them now (formulas only, no model)
+                await run_rules(st)
+            st.advice = advisor.template_advice(st.rules)
     return _assemble(st, data_version)
 
 

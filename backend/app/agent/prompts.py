@@ -1,5 +1,5 @@
 """Orchestrator prompts. Versioned: PROMPT_VERSION is part of every cache key, so editing a prompt means bumping it."""
-PROMPT_VERSION = "plan-v1.5/explain-v2.1"
+PROMPT_VERSION = "plan-v1.5/explain-v2.1/advise-v1"
 
 # Short on purpose: the 4B model works best with brief instructions. The variable context goes last, in its own message,
 # so the prompt prefix stays identical between runs and the server can reuse its cache.

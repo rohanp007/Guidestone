@@ -23,6 +23,7 @@ class EventSpec:
     allowed_tools: list[str]                             # what the planner may add
     default_plan: Callable[[Profile], list[PlanStep]]    # used when planning fails; decided in code from the profile
     explain: bool                                        # produce a grounded summary
+    advise: bool                                         # run the decision rules and the advisor
     cache: Literal["session", "params", "none"]          # session / params: keyed by the params, kept until the data or prompt changes
 
     def tools_for(self, profile: Profile) -> list[str]:
@@ -42,7 +43,7 @@ EVENTS: dict[str, EventSpec] = {
         precompute=[PlanStep(tool="forecast_liquid_summary", args={"horizon_months": 24}, reason="precompute"),
                     PlanStep(tool="paycheck_to_paycheck", reason="precompute")],
         allowed_tools=["job_loss_stress", "forecast_liquid_summary"],
-        default_plan=_dashboard_default, explain=True, cache="session"),
+        default_plan=_dashboard_default, explain=True, advise=True, cache="session"),
 }
 
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import json
+import re
 import time
 
 import pytest
@@ -16,6 +17,7 @@ from app.data.loader import load_profiles
 from app.formulas.registry import FORMULAS
 from app.llm import client
 from app.llm.client import LLMResponseError, LLMResult, LLMUnavailable
+from app.agent.advisor import AdvisorAnswer, AdvisorMove
 from app.llm.schemas import Explanation
 from helpers import session_for
 
@@ -23,11 +25,20 @@ GOOD_TEXT = "Your balance dips below your cushion until mid-December, then rises
 JOB = {"tool": "job_loss_stress", "args": {"horizon_months": 24}, "reason": "check emergency fund coverage"}
 
 
+def adopt_examples(messages) -> AdvisorAnswer:
+    """A well-behaved advisor: every candidate in the order given, each with its example sentence (placeholders and all)."""
+    view = messages[-1]["content"] if messages[-1]["role"] == "user" else messages[1]["content"]
+    codes = re.findall(r"move_code (\w+):", view)
+    examples = re.findall(r"example sentence: (.*)", view)
+    return AdvisorAnswer(moves=[AdvisorMove(move_code=c, title_text="A move", why_text=e) for c, e in zip(codes, examples)])
+
+
 class FakeLLM:
     """Stands in for client.complete: the planner gets `plan`, the explainer gets `text`. Any of them may be an exception to raise."""
     def __init__(self, plan=None, text=GOOD_TEXT):
         self.plan = [JOB] if plan is None else plan
         self.text = text
+        self.advice = adopt_examples                        # the advisor: adapt each example sentence (the default), or an answer / an exception
         self.calls: list[str] = []
         self.messages: list[list[dict]] = []
         self.gate: asyncio.Event | None = None         # when set, the planner waits for it
@@ -41,6 +52,10 @@ class FakeLLM:
             if self.gate is not None: await self.gate.wait()
             if isinstance(self.plan, BaseException): raise self.plan
             return LLMResult("", parsed=Plan(steps=[PlanStep(**s) for s in self.plan]))
+        if json_schema is AdvisorAnswer:
+            self.calls.append("advise")
+            if isinstance(self.advice, BaseException): raise self.advice
+            return LLMResult("", parsed=self.advice(messages) if callable(self.advice) else self.advice)
         assert json_schema is Explanation
         self.calls.append("explain")
         if isinstance(self.text, BaseException): raise self.text
@@ -83,9 +98,10 @@ def test_happy_path(fake, profiles):
     assert r.status == r.facts["overall_status"] == "watch"                         # decided in code
     assert r.facts["paycheck_to_paycheck"] in ("yes", "no") and r.facts["employment"] == "employed"
     assert r.summary.source == "model" and r.summary.text == GOOD_TEXT and r.summary.grounding.ok
-    assert kinds(r) == ["precompute", "precompute", "plan", "tool", "explain"]
+    assert [k for k in kinds(r) if k not in ("rules", "advise", "explain")] == ["precompute", "precompute", "plan", "tool"]
+    assert {"rules", "advise", "explain"} <= set(kinds(r)) and r.advice and r.advice.source == "model"
     assert [s.name for s in r.trace if s.kind == "tool"] == ["job_loss_stress"] and all(s.ok for s in r.trace)
-    assert r.research == [] and r.advice is None and r.prompt_version and len(r.data_version) == 12
+    assert r.research == [] and r.prompt_version and len(r.data_version) == 12
     json.dumps(r.model_dump(mode="json"), allow_nan=False)                           # JSON-safe
 
 
@@ -147,7 +163,7 @@ def test_planner_failure_uses_the_default_plan(fake, profiles, err):
 def test_retiree_default_plan_is_empty(fake, profiles):
     fake.plan = LLMUnavailable("down")
     r = go(profiles["C010"])
-    assert r.degraded and "tool" not in kinds(r) and r.summary and r.compute.keys() == {"forecast_liquid_summary", "paycheck_to_paycheck"}
+    assert r.degraded and "tool" not in kinds(r) and r.summary and r.compute.keys() == {"forecast_liquid_summary", "paycheck_to_paycheck", "priority_waterfall", "candidate_moves"}
 
 
 def test_explainer_failure_uses_the_template(fake, profiles):

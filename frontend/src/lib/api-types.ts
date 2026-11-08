@@ -277,6 +277,49 @@ export interface components {
             /** Penalty Days */
             penalty_days?: number | null;
         };
+        /**
+         * Advice
+         * @description What the customer is told to do next. The verdict and the candidates come from code; the model only picks and words them.
+         */
+        Advice: {
+            /**
+             * Verdict
+             * @enum {string}
+             */
+            verdict: "on_track" | "plan_ahead" | "act_now";
+            /** Current Step */
+            current_step: number | "gap" | null;
+            /** Moves */
+            moves: components["schemas"]["AdviceMove"][];
+            /** Notes */
+            notes?: string[];
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "model" | "template" | "mixed";
+            grounding: components["schemas"]["GroundingSummary"];
+        };
+        /** AdviceMove */
+        AdviceMove: {
+            /** Rank */
+            rank: number;
+            /** Move Code */
+            move_code: string;
+            /** Title Text */
+            title_text: string;
+            /** Why Text */
+            why_text: string;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "model" | "template";
+            /** Priority */
+            priority: number;
+            /** Addresses Current Step */
+            addresses_current_step: boolean;
+        };
         /** AnalysisResult */
         AnalysisResult: {
             /** Run Id */
@@ -310,8 +353,7 @@ export interface components {
             summary: components["schemas"]["HeadlineSummary"] | null;
             /** Research */
             research?: unknown[];
-            /** Advice */
-            advice?: unknown | null;
+            advice?: components["schemas"]["Advice"] | null;
             /** Trace */
             trace: components["schemas"]["TraceStep"][];
             /** Llm Trace */
@@ -779,7 +821,7 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "precompute" | "plan" | "plan_rejected" | "tool" | "explain" | "fallback" | "cache_hit";
+            kind: "precompute" | "plan" | "plan_rejected" | "tool" | "rules" | "explain" | "advise" | "fallback" | "cache_hit";
             /** Name */
             name: string;
             /**

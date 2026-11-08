@@ -14,7 +14,7 @@ from app.config import FEATURED_PERSONAS               # noqa: E402
 from app.data.loader import load_profiles              # noqa: E402
 from app.llm import client                             # noqa: E402
 
-MAX_UNCACHED_S, MAX_CACHED_MS = 5.0, 50.0
+MAX_UNCACHED_S, MAX_CACHED_MS = 45.0, 50.0       # the advisor (reasoning on) dominates; the run limit is 45 s
 
 
 async def main() -> int:

@@ -451,13 +451,13 @@ def _freed_payments(profile: Profile, T: dict) -> list[dict]:
 Verdict = Literal["on_track", "plan_ahead", "act_now"]
 
 
-def verdict(profile: Profile, overall_status: str, overdraft_probability: float = 0.0) -> Verdict:
+def verdict(profile: Profile, overall_status: str, overdraft_probability: float = 0.0, wf: Waterfall | None = None) -> Verdict:
     """The advisor's verdict, decided in code (docs/rules.md section 4). act_now: the first open step is 1 or 3, or overall_status is
     at_risk. plan_ahead: it is 4-6, or overall_status is watch. Otherwise on_track.
     Negative surplus raises the floor to plan_ahead, and to act_now when an overdraft is possible or the customer's investments
     cover fewer than retiree_investment_cover_months of essentials (no backstop for the gap)."""
     T = thresholds()
-    wf = priority_waterfall(profile)
+    wf = wf or priority_waterfall(profile)
     step = wf.first_open_step
     if step in (1, 3) or overall_status == "at_risk":
         out: Verdict = "act_now"

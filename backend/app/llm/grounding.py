@@ -86,7 +86,9 @@ def _kind_of(path: str) -> str:
     leaf = path.rsplit(".", 1)[-1].split("[")[0]
     if leaf.startswith(("share_of", "chance_of", "probability")):
         return "ratio"
-    return "count" if leaf in ("horizon_months",) else "money"
+    if leaf.endswith(("_apr", "_rate", "_pct", "_share")):         # a fraction written as a percentage (an APR, a savings rate)
+        return "ratio"
+    return "count" if leaf == "horizon_months" or leaf.endswith("_months") else "money"
 
 
 def flatten(facts: Any, path: str = "") -> list[Fact]:
@@ -181,8 +183,11 @@ def _date_parts(iso: str) -> tuple[int, int, int]:
     return d.year, d.month, d.day
 
 
-def check(text: str, facts: dict, context_numbers: tuple[float, ...] = (), judgments: bool = False, style: bool = False) -> GroundingReport:
-    """context_numbers: figures that come from the question, not the facts (e.g. 12 when the horizon asked about is 12 months)."""
+def check(text: str, facts: dict, context_numbers: tuple[float, ...] = (), judgments: bool = False, style: bool = False,
+          hints: bool = True) -> GroundingReport:
+    """context_numbers: figures that come from the question, not the facts (e.g. 12 when the horizon asked about is 12 months).
+    hints=False: do not narrow the candidate facts by the words next to a figure (for small, per-topic fact sets, where those
+    words would only cause false rejections)."""
     allowed = flatten(facts) + derived(facts)
     dates = [f for f in allowed if f.kind == "date"]
     numbers: list[CheckedNumber] = []
@@ -194,10 +199,12 @@ def check(text: str, facts: dict, context_numbers: tuple[float, ...] = (), judgm
         taken.append((m.start(), m.end()))
         return True
 
+    use_hints = hints
+
     def paths_ok(pool: list[Fact], hints: tuple[str, ...] | None) -> list[Fact]:
         """Narrow the candidates to the facts the nearby words ask for, when the facts have such a topic at all (of any kind: a money
         figure next to "overdraft" must not match the cushion just because only the overdraft *chance* is a ratio)."""
-        if hints and any(h in f.path for f in allowed for h in hints):
+        if use_hints and hints and any(h in f.path for f in allowed for h in hints):
             return [f for f in pool if any(h in f.path for h in hints)]
         return pool
 
@@ -252,7 +259,7 @@ def check(text: str, facts: dict, context_numbers: tuple[float, ...] = (), judgm
         num = m["n"].replace(",", "")
         if "." not in num and (len(num) < 3 or 1900 <= int(num) <= 2100):
             continue
-        if not claim(m, "bare"):
+        if re.match(r"\((?:k|b)\)", text[m.end():]) or not claim(m, "bare"):      # 401(k), 403(b): a name, not a figure
             continue
         v = float(num)
         pool = paths_ok([f for f in allowed if f.kind in ("money", "ratio")], _hints(text, m.start(), m.end()))

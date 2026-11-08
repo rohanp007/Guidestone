@@ -25,7 +25,7 @@ class Plan(BaseModel):
     steps: list[PlanStep] = Field(default_factory=list)
 
 
-TraceKind = Literal["precompute", "plan", "plan_rejected", "tool", "explain", "fallback", "cache_hit"]
+TraceKind = Literal["precompute", "plan", "plan_rejected", "tool", "rules", "explain", "advise", "fallback", "cache_hit"]
 
 
 class TraceStep(BaseModel):
@@ -50,6 +50,26 @@ class HeadlineSummary(BaseModel):
     grounding: GroundingSummary
 
 
+class AdviceMove(BaseModel):
+    rank: int
+    move_code: str                           # always one of the candidate moves (checked in code)
+    title_text: str                          # placeholders already filled in
+    why_text: str
+    source: Literal["model", "template"]
+    priority: int                            # the waterfall step the move serves (0 = close the monthly gap, 8 = an opportunity)
+    addresses_current_step: bool
+
+
+class Advice(BaseModel):
+    """What the customer is told to do next. The verdict and the candidates come from code; the model only picks and words them."""
+    verdict: Literal["on_track", "plan_ahead", "act_now"]      # set by code (rules.verdict)
+    current_step: int | Literal["gap"] | None
+    moves: list[AdviceMove]                  # at most 3, ranked
+    notes: list[str] = Field(default_factory=list)             # e.g. "Retirement saving comes before education saving."
+    source: Literal["model", "template", "mixed"]
+    grounding: GroundingSummary
+
+
 class AnalysisResult(BaseModel):
     run_id: str
     event: str
@@ -64,7 +84,7 @@ class AnalysisResult(BaseModel):
     status: str | None                       # overall_status, decided in code
     summary: HeadlineSummary | None
     research: list[Any] = Field(default_factory=list)       # empty in v1
-    advice: Any | None = None                                # empty in v1
+    advice: Advice | None = None
     trace: list[TraceStep]
     llm_trace: list[dict[str, Any]]          # the LLM client's per-run trace
     degraded: bool = False                   # a fallback was used somewhere
