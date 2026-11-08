@@ -26,13 +26,34 @@
     "uncalibrated_month_end": 0.5952380952380952,
     "uncalibrated_all_days": 0.4270740905057675
   },
+  "backtest_error": {
+    "30d": {
+      "median": 0.03910598345606432,
+      "p75": 0.06847621154877248,
+      "p90": 0.14808071413155807,
+      "customers": 98
+    },
+    "90d": {
+      "median": 0.05829964842705311,
+      "p75": 0.08118845425598817,
+      "p90": 0.1094221694427842,
+      "customers": 98
+    },
+    "180d": {
+      "median": 0.062356612175136564,
+      "p75": 0.10766042434857806,
+      "p90": 0.17124258458264258,
+      "customers": 98
+    }
+  },
   "options": {
     "total_spend": true,
     "uncertainty": true,
     "recurring_noise": true,
     "seasonal_uncertainty": true,
     "sweeps": true,
-    "calibrate": true
+    "calibrate": true,
+    "utility_seasonality": true
   },
   "note": "p10-p90 bands scaled using backtest errors across 98 customers (monthly chart x2.1 / x1.6 / x1.8 at 30 / 90 / 180 days); on held-out customers the monthly band contained the actual outcome 82% of the time (was 60%), and the daily band 84% of days (was 43%)"
 }

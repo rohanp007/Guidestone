@@ -22,4 +22,4 @@ def assumptions() -> AssumptionsResponse:
     cal = forecast._calibration()
     return AssumptionsResponse(assumptions=config.assumptions(), calibration=cal["note"] if cal else None,
                                calibration_details={k: cal[k] for k in ("nominal", "anchors_days", "daily_factors", "month_end_factors",
-                                                                         "customers", "left_out", "held_out")} if cal else None)
+                                                                         "customers", "left_out", "held_out", "backtest_error")} if cal else None)

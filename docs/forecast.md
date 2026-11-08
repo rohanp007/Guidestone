@@ -139,3 +139,19 @@ did not hit trouble, and customers forecast at high risk did." It does not suppo
 | Refit band calibration | `.venv/bin/python3 scripts/fit_calibration.py` |
 
 Model switches live in `forecast.OPTIONS`; all are on in production.
+
+## Calendar events from the schedule
+
+Computed from the schedule, not guessed, and listed in `events` for the UI and the agents:
+
+- `extra_paycheck`: a calendar month with three biweekly paydays; `monthly_impact` is one paycheck. Two a year for every biweekly earner.
+- `double_payment`: a monthly bill or card payment that slid across the month boundary and lands twice (e.g. Feb 28 falling on a Saturday
+  moves to Mar 1, so March has two card payments); `monthly_impact` is the extra payment (card: the simulated median).
+- `raise` and `rent_renewal` are placed on the as-of anniversary. That timing is assumed, and the debug page labels it.
+
+## Utility seasonality (tested, off)
+
+`derive.py` can learn 12 calendar-month factors per utility bill (`Recurring.month_factors`, shrunk and rescaled to average 1.0) and the
+forecast applies them. Backtest, 180-day median error / raw month-end coverage: no seasonality 6.2% / 0.60; half the observed swing
+6.8% / 0.58; all of it 7.1% / 0.55. It made the forecast worse, so `UTILITY_SEASON_SHRINK = 0.0` (off) and the calibration is unchanged.
+Revisit once the unexplained July over-forecast is understood.

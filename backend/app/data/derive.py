@@ -32,7 +32,11 @@ CARRY_MONTHS = 3          # card "carries a balance" if it posted interest in at
 TOP_CATEGORIES = 5
 FIXED_AMOUNT_CV = 0.02    # a bill whose monthly amount varies less than this is "fixed" (rent, loan, subscription) and gets no residuals
 NOISY_KINDS = frozenset({"utility", "insurance", "housing", "subscription"})
-ACTIVE_WITHIN_DAYS = 35   # ...and its last occurrence must be this recent, else it has ended (loan paid off, sub cancelled)
+# Share of the observed calendar-month swing kept for a utility bill. 0.0 = OFF (all factors 1.0). Measured on the backtest
+# (180-day median error / raw month-end coverage): 0.0 -> 6.2% / 0.60, 0.5 -> 6.8% / 0.58, 1.0 -> 7.1% / 0.55. It made the forecast
+# worse, so it ships off. Re-test after the July shift (an unexplained ~4% outflow over-forecast from July) is understood.
+UTILITY_SEASON_SHRINK = 0.0
+ACTIVE_WITHIN_DAYS = 35  # ...and its last occurrence must be this recent, else it has ended (loan paid off, sub cancelled)
 
 # Only these categories can be recurring. Merchant spending (groceries, dining, ...) hits many months too,
 # but its amounts are discretionary, so it belongs in variable_spend, not here.
@@ -73,20 +77,34 @@ def _tag(tx: pd.DataFrame) -> pd.DataFrame:
     return tx
 
 
-def _recurring(tx: pd.DataFrame, as_of: date | None = None, months: pd.PeriodIndex | None = None) -> tuple[list[Recurring], pd.Series]:
+def _month_factors(ratios: pd.Series, calendar_month) -> list[float]:
+    """Jan..Dec multipliers for one bill, from its ratio to its own mean in each history month. Each calendar month is seen only
+    once or twice in 24 months, so each factor is shrunk halfway to 1.0 (as spending seasonality is) and the 12 are rescaled to
+    average 1.0, so the annual total is unchanged. A calendar month never seen gets 1.0."""
+    by = pd.Series(np.asarray(ratios), index=np.asarray(calendar_month)).groupby(level=0).mean()
+    raw = np.array([by.get(m, 1.0) for m in range(1, 13)])
+    shrunk = 1 + UTILITY_SEASON_SHRINK * (raw - 1)
+    return (shrunk / shrunk.mean()).tolist()
+
+
+def _recurring(tx: pd.DataFrame, as_of: date | None = None, months: pd.PeriodIndex | None = None,
+               ended_out: list[Recurring] | None = None) -> tuple[list[Recurring], pd.Series]:
     """Returns the active recurring flows and a boolean mask of the rows that belong to them.
 
     Flows that ended before `as_of` are left out: `recurring` is the base for forecasting, so a paid-off
-    loan must not keep reserving cash. Their rows fall through to variable_spend (expenses) or are ignored."""
+    loan must not keep reserving cash. Their rows fall through to variable_spend (expenses) or are ignored. When `ended_out`
+    is given, the ended flows are appended to it (for display only)."""
     found, kept = [], []
     for (key, sign), g in tx[tx["candidate"]].groupby(["key", "sign"], sort=False):
         months_seen = g["month"].nunique()
         if months_seen < MIN_MONTHS_SEEN:
             continue
         last_date = g["posted_date"].max().date()
-        if as_of and (as_of - last_date).days > ACTIVE_WITHIN_DAYS:
+        ended = bool(as_of and (as_of - last_date).days > ACTIVE_WITHIN_DAYS)
+        if ended and ended_out is None:
             continue
-        kept.append((key, sign))
+        if not ended:
+            kept.append((key, sign))
         first = g["posted_date"].min()
         span_months = (last_date.year - first.year) * 12 + last_date.month - first.month + 1
         per_occurrence = float(g["balance_change"].median())      # the typical payment, for display
@@ -94,18 +112,26 @@ def _recurring(tx: pd.DataFrame, as_of: date | None = None, months: pd.PeriodInd
         desc, category = g["desc"].value_counts().index[0], g["category"].value_counts().index[0]
         kind = _kind(category, desc)
         residuals: list[float] = []
+        month_factors: list[float] = []
         if months is not None and kind in NOISY_KINDS:
             monthly = g.groupby("month")["balance_change"].sum().reindex(months).fillna(0.0)
             paid = monthly[monthly != 0]
             if len(paid) >= 2 and paid.mean() != 0 and (paid / paid.mean()).std() >= FIXED_AMOUNT_CV:
-                residuals = ((monthly / paid.mean()) - 1).where(monthly != 0, 0.0).tolist()
-        found.append(Recurring(
-            description=desc, category=category, kind=kind, cadence=_cadence(per_month), residuals=residuals,
+                resid = ((monthly / paid.mean()) - 1).where(monthly != 0, 0.0)
+                if kind == "utility":                              # heating / cooling: calendar-month factors, noise is what is left
+                    month_factors = _month_factors(1 + resid[monthly != 0], monthly.index[monthly != 0].month)
+                    cal = np.asarray(monthly.index.month) - 1
+                    resid = ((1 + resid) / np.asarray(month_factors)[cal] - 1).where(monthly != 0, 0.0)
+                residuals = resid.tolist()
+        (ended_out if ended else found).append(Recurring(
+            description=desc, category=category, kind=kind, cadence=_cadence(per_month), residuals=residuals, month_factors=month_factors,
             monthly_amount=float(g["balance_change"].sum()) / span_months, amount_per_occurrence=per_occurrence,
             occurrences_per_month=per_month, typical_day=int(round(g["posted_date"].dt.day.median())),
             months_seen=months_seen, last_date=last_date, account_id=g["account_id"].iat[0],
         ))
     found.sort(key=lambda r: (r.monthly_amount < 0, -abs(r.monthly_amount)))
+    if ended_out is not None:
+        ended_out.sort(key=lambda r: r.last_date, reverse=True)
     in_recurring = pd.Series(list(zip(tx["key"], tx["sign"])), index=tx.index).isin(kept) & tx["candidate"]
     return found, in_recurring
 
@@ -310,10 +336,12 @@ def enrich(profile: Profile, transactions: pd.DataFrame, statements: pd.DataFram
         return profile
     tx = _tag(transactions)
     months = pd.PeriodIndex(pd.to_datetime(statements["month"]), freq="M").unique().sort_values()
-    recurring, in_recurring = _recurring(tx, profile.as_of_date, months)
+    ended: list[Recurring] = []
+    recurring, in_recurring = _recurring(tx, profile.as_of_date, months, ended)
     n_months = statements["month"].nunique() or tx["month"].nunique()
     profile = profile.model_copy(update={
         "recurring": recurring,
+        "ended_recurring": ended,
         "variable_spend": _variable(tx, in_recurring, n_months, checking_only=False),
         "variable_spend_checking": _variable(tx, in_recurring, n_months, checking_only=True),
         "history": _history(profile, tx, statements),
