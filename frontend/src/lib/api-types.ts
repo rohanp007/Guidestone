@@ -2001,10 +2001,20 @@ export interface components {
              */
             highest_debt_apr?: number | null;
             /**
+             * Highest Debt Type
+             * @default null
+             */
+            highest_debt_type?: string | null;
+            /**
              * Savings Rate
              * @default null
              */
             savings_rate?: number | null;
+            /**
+             * Holds Hys
+             * @default false
+             */
+            holds_hys?: boolean;
         };
         /** AddLoan */
         AddLoan: {

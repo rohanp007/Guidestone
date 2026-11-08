@@ -250,7 +250,7 @@ def test_a_cheap_mortgage_alone_is_keep_cash_not_no_debt(profiles):
     r = go(profiles["C095"], m)
     p = r.payoff
     assert p.verdict == "keep_cash" and p.recommended.code == "E" and [c.code for c in p.comparison] == list("ABCDE")
-    assert "2.8%" in p.answer.text and "3.7%" in p.answer.text, p.answer.text
+    assert p.answer.text.startswith("Your mortgage costs 2.8% a year") and "4.1% your savings earn" in p.answer.text, p.answer.text
     summary = r.compute["payoff_strategies_summary"]
     assert summary["no_debt"] is False and summary["excluded_mortgages"] == [] and summary["highest_debt_apr"] == pytest.approx(0.02773, abs=1e-4)
 
@@ -259,3 +259,12 @@ def test_really_no_debt_stays_no_debt(profiles):
     m = Model(example)
     p = go(profiles["C010"], m).payoff
     assert p.verdict == "no_debt" and m.calls == []
+
+
+def test_without_a_high_yield_account_the_rate_is_an_option(profiles):
+    from app.formulas.payoff import PayoffStrategiesSummary
+    s = PayoffStrategiesSummary.model_validate(go(profiles["C095"], Model(example)).compute["payoff_strategies_summary"]).model_copy(
+        update={"holds_hys": False, "savings_rate": 0.0372})
+    pf = payoff_advisor.facts_for(s, next(c for c in s.strategies if c.code == "E"))
+    t = payoff_advisor.template_text("keep_cash", pf)
+    assert t == "Your mortgage costs 2.8% a year, while a high-yield savings account earns about 3.7%, so extra payments are optional."
