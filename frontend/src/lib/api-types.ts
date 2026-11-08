@@ -342,6 +342,8 @@ export interface components {
             accounts: components["schemas"]["Account"][];
             /** Recurring */
             recurring?: components["schemas"]["Recurring"][];
+            /** Ended Recurring */
+            ended_recurring?: components["schemas"]["Recurring"][];
             /** Variable Spend */
             variable_spend?: {
                 [key: string]: number;
@@ -745,7 +747,7 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "raise" | "rent_renewal" | "loan_ends" | "cd_matures" | "lump_sum" | "income_change";
+            kind: "raise" | "rent_renewal" | "loan_ends" | "cd_matures" | "lump_sum" | "income_change" | "extra_paycheck" | "double_payment";
             /** Description */
             description: string;
             /**
@@ -782,6 +784,13 @@ export interface components {
             /** P90 */
             p90: number;
         };
+        /** MonthEndProbability */
+        MonthEndProbability: {
+            /** Month */
+            month: string;
+            /** Probability */
+            probability: number;
+        };
         /** MonthlyNet */
         MonthlyNet: {
             /** Mean */
@@ -812,6 +821,12 @@ export interface components {
             first_date_p50: string | null;
             /** First Date P10 */
             first_date_p10: string | null;
+            /** Share Of Days Below */
+            share_of_days_below: number;
+            /** Last Date Below P50 */
+            last_date_below_p50: string | null;
+            /** Month End Probability By Month */
+            month_end_probability_by_month: components["schemas"]["MonthEndProbability"][];
         };
         /** LiquidForecast */
         LiquidForecast: {
