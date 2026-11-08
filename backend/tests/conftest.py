@@ -11,6 +11,8 @@ os.environ["SESSION_SECRET"] = "test-secret-" + "x" * 40
 os.environ["DEMO_PASSWORD_HASH"] = PasswordHasher().hash(TEST_PASSWORD)
 os.environ["DEMO_MODE"] = "true"
 os.environ["COOKIE_SECURE"] = "false"
+os.environ["AGENT_WARM_ON_STARTUP"] = "false"    # nor does the server warm the featured personas when the app starts
+os.environ["AGENT_WARM_ON_LOGIN"] = "false"      # logins do not start background check-ups in tests (test_orchestrator turns it on)
 
 import pytest                                    # noqa: E402
 
@@ -22,3 +24,10 @@ def _fresh_rate_limits():
     auth.reset_rate_limits()
     yield
     auth.reset_rate_limits()
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_llm_env(monkeypatch):
+    """The developer's .env points the agents at real servers; tests must see the built-in defaults."""
+    for name in [k for k in os.environ if k.startswith("LLM_")]:
+        monkeypatch.delenv(name)

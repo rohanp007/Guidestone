@@ -208,6 +208,137 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/me/agent/{event}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Run Event */
+        post: operations["run_event_api_me_agent__event__post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/agent/{event}/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Event Stream
+         * @description Same body and result as the plain endpoint, with the run's progress as server-sent events (plain-language labels only).
+         */
+        post: operations["run_event_stream_api_me_agent__event__stream_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/profile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** My Profile */
+        get: operations["my_profile_api_me_profile_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/transactions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** My Transactions */
+        get: operations["my_transactions_api_me_transactions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/forecast": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * My Forecast
+         * @description 180-day liquid-cash forecast with a daily band for every day of the horizon.
+         */
+        get: operations["my_forecast_api_me_forecast_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * My Status
+         * @description The cash-outlook status, decided in code from the forecast (the same rule the advisor uses). Fast: no model involved.
+         */
+        get: operations["my_status_api_me_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/recurring": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * My Recurring
+         * @description Income, bills and debt payments with the next expected date. Transfers to savings or investments are not bills.
+         */
+        get: operations["my_recurring_api_me_recurring_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -260,6 +391,162 @@ export interface components {
             /** Penalty Days */
             penalty_days?: number | null;
         };
+        /**
+         * Advice
+         * @description What the customer is told to do next. The verdict and the candidates come from code; the model only picks and words them.
+         */
+        Advice: {
+            /**
+             * Verdict
+             * @enum {string}
+             */
+            verdict: "on_track" | "plan_ahead" | "act_now";
+            /** Current Step */
+            current_step: number | "gap" | null;
+            /** Moves */
+            moves: components["schemas"]["AdviceMove"][];
+            /** Notes */
+            notes?: string[];
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "model" | "template" | "mixed";
+            grounding: components["schemas"]["GroundingSummary"];
+            diagnostics: components["schemas"]["AdviceDiagnostics"];
+        };
+        /**
+         * AdviceDiagnostics
+         * @description How the advisor's answer fared, as counts and reason codes only (never model text).
+         */
+        AdviceDiagnostics: {
+            /** First Try Ok */
+            first_try_ok: boolean;
+            /** Retried */
+            retried: boolean;
+            /** Model Calls */
+            model_calls: number;
+            /** Template Moves */
+            template_moves: number;
+            /** First Reasons */
+            first_reasons?: string[];
+            /** Bad Replies */
+            bad_replies?: components["schemas"]["BadReply"][];
+            /** Final Reasons */
+            final_reasons?: string[];
+        };
+        /** AdviceMove */
+        AdviceMove: {
+            /** Rank */
+            rank: number;
+            /** Move Code */
+            move_code: string;
+            /** Title Text */
+            title_text: string;
+            /** Why Text */
+            why_text: string;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "model" | "template";
+            /** Priority */
+            priority: number;
+            /** Addresses Current Step */
+            addresses_current_step: boolean;
+        };
+        /** Amortization */
+        Amortization: {
+            /** Months To Payoff */
+            months_to_payoff: number | null;
+            /** Payoff Date */
+            payoff_date: string | null;
+            /** Total Interest */
+            total_interest: number;
+            /** Total Paid */
+            total_paid: number;
+            /** Never Pays Off */
+            never_pays_off: boolean;
+            /** Hit Max Months */
+            hit_max_months: boolean;
+            /** Max Months */
+            max_months: number;
+            /** Extra Monthly */
+            extra_monthly: number;
+            /** Lump Sum */
+            lump_sum: number;
+            /** Lump Applied */
+            lump_applied: number;
+            /** Rollover */
+            rollover: boolean;
+            /** Order */
+            order: string[];
+            /** Lump Order */
+            lump_order: string[];
+            /** Per Debt */
+            per_debt: {
+                [key: string]: components["schemas"]["DebtPayoff"];
+            };
+            /** Schedule */
+            schedule: components["schemas"]["ScheduleRow"][];
+        };
+        /** AnalysisResult */
+        AnalysisResult: {
+            /** Run Id */
+            run_id: string;
+            /** Event */
+            event: string;
+            /** Feature */
+            feature: string;
+            /** Customer Id */
+            customer_id: string;
+            /** As Of */
+            as_of: string;
+            /** Prompt Version */
+            prompt_version: string;
+            /** Data Version */
+            data_version: string;
+            /** Inputs */
+            inputs: {
+                [key: string]: unknown;
+            };
+            /** Compute */
+            compute: {
+                [key: string]: unknown;
+            };
+            /** Facts */
+            facts: {
+                [key: string]: unknown;
+            };
+            /** Status */
+            status: string | null;
+            summary: components["schemas"]["HeadlineSummary"] | null;
+            /** Research */
+            research?: unknown[];
+            advice?: components["schemas"]["Advice"] | null;
+            payoff?: components["schemas"]["PayoffAnalysis"] | null;
+            buy?: components["schemas"]["BuyAnalysis"] | null;
+            /** Trace */
+            trace: components["schemas"]["TraceStep"][];
+            /** Llm Trace */
+            llm_trace: {
+                [key: string]: unknown;
+            }[];
+            /**
+             * Degraded
+             * @default false
+             */
+            degraded?: boolean;
+        };
+        /** Assumption */
+        Assumption: {
+            /** Value */
+            value: number;
+            /** Source */
+            source: string;
+            /** As Of */
+            as_of: string;
+        };
         /** AssumptionsResponse */
         AssumptionsResponse: {
             /** Assumptions */
@@ -275,6 +562,233 @@ export interface components {
                 [key: string]: unknown;
             } | null;
         };
+        /**
+         * Backtest
+         * @description Rebuilt from the first 18 months only, forecast the rest, compared with the actual daily balance.
+         */
+        Backtest: {
+            /**
+             * Cutoff
+             * Format: date
+             */
+            cutoff: string;
+            /** Days */
+            days: number;
+            /** Avg Monthly Outflow */
+            avg_monthly_outflow: number;
+            /** Outflow Err 30D */
+            outflow_err_30d: number | null;
+            /** Outflow Err 90D */
+            outflow_err_90d: number | null;
+            /** Outflow Err 180D */
+            outflow_err_180d: number | null;
+            /** Net Change Err 30D */
+            net_change_err_30d: number | null;
+            /** Net Change Err 90D */
+            net_change_err_90d: number | null;
+            /** Net Change Err 180D */
+            net_change_err_180d: number | null;
+            /** Mape 30D */
+            mape_30d: number | null;
+            /** Mape 90D */
+            mape_90d: number | null;
+            /** Mape 180D */
+            mape_180d: number | null;
+            /** Band Coverage */
+            band_coverage: number | null;
+            /** Band Coverage Month End */
+            band_coverage_month_end?: number | null;
+            /** Known One Off */
+            known_one_off?: string | null;
+        };
+        /**
+         * BadReply
+         * @description One model reply that was not usable JSON: how it ended, never what it said. finish_reason "length" means it was cut off.
+         */
+        BadReply: {
+            /** Finish Reason */
+            finish_reason: string;
+            /** Completion Tokens */
+            completion_tokens: number;
+            /** Max Tokens */
+            max_tokens: number | null;
+        };
+        /**
+         * BuyAnalysis
+         * @description The simulate_buy event's result: the cars the Researcher picked, three ways to pay for the chosen one, and the answer.
+         */
+        BuyAnalysis: {
+            /**
+             * No Options
+             * @default false
+             */
+            no_options?: boolean;
+            /** Verdict */
+            verdict: ("affordable" | "stretch" | "not_now") | null;
+            query: components["schemas"]["BuyQuery"];
+            /** Picks */
+            picks: components["schemas"]["ResearchPick"][];
+            /**
+             * Research Source
+             * @enum {string}
+             */
+            research_source: "model" | "template";
+            /** Chosen */
+            chosen: string | null;
+            plans: components["schemas"]["BuyPlans"] | null;
+            answer: components["schemas"]["PayoffAnswer"];
+        };
+        /** BuyPlan */
+        BuyPlan: {
+            /**
+             * Status
+             * @default ok
+             * @enum {string}
+             */
+            status?: "ok" | "infeasible";
+            /** Warnings */
+            warnings?: components["schemas"]["BuyWarning"][];
+            /**
+             * Code
+             * @enum {string}
+             */
+            code: "cash" | "finance" | "mix";
+            /** Name */
+            name: string;
+            /** Down Payment */
+            down_payment: number;
+            /** Loan Amount */
+            loan_amount: number;
+            /** Monthly Payment */
+            monthly_payment: number;
+            /** Term Months */
+            term_months: number;
+            /** Total Interest */
+            total_interest: number;
+            /** Total Cost */
+            total_cost: number;
+            /** Cash After */
+            cash_after: number | null;
+            /** Payment Share Of Gross */
+            payment_share_of_gross: number;
+            /** Payment Ok */
+            payment_ok: boolean;
+            /** Cushion Floor */
+            cushion_floor: number;
+            cushion: components["schemas"]["SimSummary"] | null;
+            /** Cushion Shortfall */
+            cushion_shortfall: number | null;
+            /** Cushion Holds */
+            cushion_holds: boolean | null;
+            apr_source?: components["schemas"]["SourceRef"] | null;
+            /**
+             * Same As Cash
+             * @default false
+             */
+            same_as_cash?: boolean;
+        };
+        /** BuyPlans */
+        BuyPlans: {
+            /** Profile Id */
+            profile_id: string;
+            /** Vehicle Id */
+            vehicle_id: string;
+            /** Vehicle Name */
+            vehicle_name: string;
+            /** Price */
+            price: number;
+            /**
+             * Price Includes
+             * @default starting MSRP: before tax, destination and fees
+             */
+            price_includes?: string;
+            /** Credit Tier */
+            credit_tier: string;
+            /** Loan Apr */
+            loan_apr: number;
+            /** Savings Rate */
+            savings_rate: number;
+            /** Safe Lump Sum */
+            safe_lump_sum: number;
+            /** Gross Monthly */
+            gross_monthly: number;
+            apr_source: components["schemas"]["SourceRef"];
+            /** Plans */
+            plans: {
+                [key: string]: components["schemas"]["BuyPlan"];
+            };
+            /**
+             * Recommended
+             * @enum {string}
+             */
+            recommended: "cash" | "finance" | "mix";
+            /**
+             * Recommended Reason
+             * @enum {string}
+             */
+            recommended_reason: "loan_cheaper_than_savings" | "cash_keeps_cushion" | "cash_would_break_cushion" | "no_safe_cash";
+            /**
+             * Verdict
+             * @enum {string}
+             */
+            verdict: "affordable" | "stretch" | "not_now";
+            /** Payment Ok */
+            payment_ok: boolean;
+            /** Cushion Holds */
+            cushion_holds: boolean;
+            /** Verdict Cap */
+            verdict_cap?: "competes_with_high_apr_debt" | null;
+            /**
+             * High Apr Debt Open
+             * @default false
+             */
+            high_apr_debt_open?: boolean;
+            /** High Apr Debt Apr */
+            high_apr_debt_apr?: number | null;
+            /**
+             * Caption
+             * @default
+             */
+            caption?: string;
+            /** Baseline Month Low P10 */
+            baseline_month_low_p10?: number[];
+            /** Scenario Month Low P10 */
+            scenario_month_low_p10?: number[];
+            /** Baseline Monthly */
+            baseline_monthly?: components["schemas"]["MonthEndPoint"][] | null;
+            /** Scenario Monthly */
+            scenario_monthly?: components["schemas"]["MonthEndPoint"][] | null;
+        };
+        /** BuyQuery */
+        BuyQuery: {
+            /**
+             * Segment
+             * @enum {string}
+             */
+            segment: "compact_suv" | "midsize_sedan";
+            /** Budget Band */
+            budget_band?: number | null;
+            /**
+             * Priorities
+             * @default []
+             */
+            priorities?: ("price" | "mpg" | "safety")[];
+        };
+        /** BuyWarning */
+        BuyWarning: {
+            /**
+             * Code
+             * @enum {string}
+             */
+            code: "not_enough_cash" | "overdraft_risk" | "competes_with_high_apr_debt";
+            /** Amount */
+            amount?: number | null;
+            /**
+             * Detail
+             * @default
+             */
+            detail?: string;
+        };
         /** CategoryShare */
         CategoryShare: {
             /** Category */
@@ -283,6 +797,34 @@ export interface components {
             monthly: number;
             /** Share */
             share: number;
+        };
+        /** CushionImpact */
+        CushionImpact: {
+            /** Cushion */
+            cushion: number;
+            /** Horizon Months */
+            horizon_months: number;
+            /** Paths */
+            paths: number;
+            baseline: components["schemas"]["SimSummary"];
+            scenario: components["schemas"]["SimSummary"];
+            diff: components["schemas"]["SimDiff"];
+        };
+        /** DebtPayoff */
+        DebtPayoff: {
+            /** Payoff Month */
+            payoff_month: number | null;
+            /** Payoff Date */
+            payoff_date: string | null;
+            /** Interest */
+            interest: number;
+            /** Paid */
+            paid: number;
+            /**
+             * Never Pays Off
+             * @default false
+             */
+            never_pays_off?: boolean;
         };
         /** DemoPersona */
         DemoPersona: {
@@ -299,6 +841,42 @@ export interface components {
         Dependent: {
             /** Age */
             age: number;
+        };
+        /**
+         * Figure
+         * @description One cited figure, straight from the research pack. value is None when the pack has no verified figure (source then says where it was
+         *     looked for, if anywhere).
+         */
+        Figure: {
+            /** Value */
+            value: number | string | null;
+            /** Unit */
+            unit: string;
+            /** Model Year */
+            model_year: number | null;
+            source: components["schemas"]["SourceRef"] | null;
+        };
+        /** ForecastEvent */
+        ForecastEvent: {
+            /**
+             * Day
+             * Format: date
+             */
+            day: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "raise" | "rent_renewal" | "loan_ends" | "cd_matures" | "lump_sum" | "income_change" | "extra_paycheck" | "double_payment";
+            /** Description */
+            description: string;
+            /** Monthly Impact */
+            monthly_impact?: number | null;
+            /**
+             * Assumed Timing
+             * @default false
+             */
+            assumed_timing?: boolean;
         };
         /** FormulaInfo */
         FormulaInfo: {
@@ -317,10 +895,30 @@ export interface components {
                 [key: string]: unknown;
             } | null;
         };
+        /** GroundingSummary */
+        GroundingSummary: {
+            /** Ok */
+            ok: boolean;
+            /** Checked */
+            checked: number;
+            /** Retried */
+            retried: boolean;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /** HeadlineSummary */
+        HeadlineSummary: {
+            /** Text */
+            text: string;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "model" | "template";
+            grounding: components["schemas"]["GroundingSummary"];
         };
         /** Health */
         Health: {
@@ -332,6 +930,7 @@ export interface components {
             as_of: string;
             /** Data Hash */
             data_hash: string;
+            llm: components["schemas"]["LLMHealth"];
         };
         /** Holding */
         Holding: {
@@ -343,6 +942,51 @@ export interface components {
             weight: number;
             /** Market Value */
             market_value: number;
+        };
+        /** LLMHealth */
+        LLMHealth: {
+            /** Reachable */
+            reachable: boolean;
+            /** Models Ready */
+            models_ready: boolean;
+        };
+        /** LiquidForecast */
+        LiquidForecast: {
+            /** Profile Id */
+            profile_id: string;
+            /**
+             * As Of Date
+             * Format: date
+             */
+            as_of_date: string;
+            /** Horizon Months */
+            horizon_months: number;
+            /** Paths */
+            paths: number;
+            /** Start Liquid */
+            start_liquid: number;
+            daily: components["schemas"]["PercentileBands"] | null;
+            /** Monthly */
+            monthly: components["schemas"]["MonthEndPoint"][] | null;
+            end_balance?: components["schemas"]["MonthEndPoint"] | null;
+            balance_12m?: components["schemas"]["MonthEndPoint"] | null;
+            low_point: components["schemas"]["LowPoint"];
+            overdraft_risk: components["schemas"]["Shortfall"];
+            cushion_risk: components["schemas"]["Shortfall"];
+            monthly_net: components["schemas"]["MonthlyNet"];
+            /** Drivers */
+            drivers: {
+                [key: string]: number;
+            };
+            /** Events */
+            events: components["schemas"]["ForecastEvent"][];
+            /** Assumptions */
+            assumptions: {
+                [key: string]: components["schemas"]["Assumption"];
+            };
+            backtest?: components["schemas"]["Backtest"] | null;
+            /** Calibration */
+            calibration?: string | null;
         };
         /** LoginRequest */
         LoginRequest: {
@@ -357,6 +1001,18 @@ export interface components {
             customer_id: string;
             /** First Name */
             first_name: string;
+        };
+        /** LowPoint */
+        LowPoint: {
+            /**
+             * Day
+             * Format: date
+             */
+            day: string;
+            /** P50 */
+            p50: number;
+            /** P10 */
+            p10: number;
         };
         /** Me */
         Me: {
@@ -373,6 +1029,29 @@ export interface components {
             /** As Of Date */
             as_of_date: string;
             summary: components["schemas"]["Summary"] | null;
+        };
+        /** MonthEndPoint */
+        MonthEndPoint: {
+            /** Month */
+            month: string;
+            /**
+             * Day
+             * Format: date
+             */
+            day: string;
+            /** P10 */
+            p10: number;
+            /** P50 */
+            p50: number;
+            /** P90 */
+            p90: number;
+        };
+        /** MonthEndProbability */
+        MonthEndProbability: {
+            /** Month */
+            month: string;
+            /** Probability */
+            probability: number;
         };
         /**
          * MonthPoint
@@ -398,6 +1077,101 @@ export interface components {
             income: number;
             /** Expenses */
             expenses: number;
+        };
+        /** MonthlyNet */
+        MonthlyNet: {
+            /** Mean */
+            mean: number;
+            /** P10 */
+            p10: number;
+            /** P90 */
+            p90: number;
+        };
+        /**
+         * PayoffAnalysis
+         * @description The simulate_payoff event's result: the answer to "should I pay it off?" and everything the Pay Off screen draws.
+         */
+        PayoffAnalysis: {
+            /**
+             * Verdict
+             * @enum {string}
+             */
+            verdict: "pay_it_off" | "pay_with_tradeoff" | "keep_cash" | "no_room" | "no_debt";
+            recommended: components["schemas"]["Recommendation"] | null;
+            /** Strategy Code */
+            strategy_code: string | null;
+            /** Strategy Title */
+            strategy_title: string | null;
+            /** Extra Monthly */
+            extra_monthly: number;
+            /** Lump Sum */
+            lump_sum: number;
+            /** Safe Lump Sum */
+            safe_lump_sum: number;
+            /** Comparison */
+            comparison: components["schemas"]["StrategySummary"][];
+            simulation: components["schemas"]["PayoffSimulation"] | null;
+            answer: components["schemas"]["PayoffAnswer"];
+        };
+        /**
+         * PayoffAnswer
+         * @description Up to two sentences about the chosen plan. The model writes them; the verdict is not part of them.
+         */
+        PayoffAnswer: {
+            /** Text */
+            text: string;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "model" | "template";
+            grounding: components["schemas"]["GroundingSummary"];
+            diagnostics: components["schemas"]["AdviceDiagnostics"];
+        };
+        /** PayoffSimulation */
+        PayoffSimulation: {
+            /**
+             * No Debt
+             * @default false
+             */
+            no_debt?: boolean;
+            strategy?: components["schemas"]["StrategyResult"] | null;
+            simulation?: components["schemas"]["SimulationResult"] | null;
+        };
+        /** PayoffWarning */
+        PayoffWarning: {
+            /** Code */
+            code: string;
+            /** Amount */
+            amount?: number | null;
+            /** Limit */
+            limit?: number | null;
+            /** Unused Amount */
+            unused_amount?: number | null;
+            /** Accounts */
+            accounts?: string[];
+            /**
+             * Detail
+             * @default
+             */
+            detail?: string;
+        };
+        /** PercentileBands */
+        PercentileBands: {
+            /** P10 */
+            p10: number[];
+            /** P50 */
+            p50: number[];
+            /** P90 */
+            p90: number[];
+        };
+        /** PickFigures */
+        PickFigures: {
+            msrp: components["schemas"]["Figure"];
+            model_year: components["schemas"]["Figure"];
+            mpg_combined: components["schemas"]["Figure"];
+            nhtsa_stars: components["schemas"]["Figure"];
+            iihs_award: components["schemas"]["Figure"];
         };
         /** Profile */
         Profile: {
@@ -496,6 +1270,15 @@ export interface components {
             /** Flags */
             flags: string[];
         };
+        /** Recommendation */
+        Recommendation: {
+            /** Code */
+            code: string | null;
+            /** Reason Code */
+            reason_code: string;
+            /** Name */
+            name?: string | null;
+        };
         /**
          * Recurring
          * @description A cash flow that repeats (derived from checking transactions).
@@ -540,6 +1323,44 @@ export interface components {
             /** Residuals */
             residuals?: number[];
         };
+        /** RecurringItem */
+        RecurringItem: {
+            /** Name */
+            name: string;
+            /**
+             * Group
+             * @enum {string}
+             */
+            group: "income" | "bill" | "debt";
+            /** Amount */
+            amount: number;
+            /** Monthly Amount */
+            monthly_amount: number;
+            /** Cadence */
+            cadence: string;
+            /**
+             * Next Date
+             * Format: date
+             */
+            next_date: string;
+        };
+        /** ResearchPick */
+        ResearchPick: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            figures: components["schemas"]["PickFigures"];
+            /** Why Text */
+            why_text: string;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "model" | "template";
+            /** Sources */
+            sources: components["schemas"]["SourceLine"][];
+        };
         /** RetirementInfo */
         RetirementInfo: {
             /**
@@ -563,6 +1384,133 @@ export interface components {
              * @enum {string}
              */
             ira_type?: "roth" | "traditional" | "";
+        };
+        /** ScheduleRow */
+        ScheduleRow: {
+            /** Month */
+            month: number;
+            /**
+             * Date
+             * Format: date
+             */
+            date: string;
+            /** Payments */
+            payments: {
+                [key: string]: number;
+            };
+            /** Interest */
+            interest: {
+                [key: string]: number;
+            };
+            /** Balances */
+            balances: {
+                [key: string]: number;
+            };
+            /** Total Payment */
+            total_payment: number;
+        };
+        /** Shortfall */
+        Shortfall: {
+            /** Buffer */
+            buffer: number;
+            /** Probability */
+            probability: number;
+            /** Probability 90D */
+            probability_90d: number;
+            /** First Date P50 */
+            first_date_p50: string | null;
+            /** First Date P10 */
+            first_date_p10: string | null;
+            /** Share Of Days Below */
+            share_of_days_below: number;
+            /** Last Date Below P50 */
+            last_date_below_p50: string | null;
+            /** Month End Probability By Month */
+            month_end_probability_by_month: components["schemas"]["MonthEndProbability"][];
+        };
+        /** SimDiff */
+        SimDiff: {
+            /** End P50 */
+            end_p50: number;
+            /** Min P10 */
+            min_p10: number;
+            /** Overdraft Prob */
+            overdraft_prob: number;
+            /** Cushion Prob */
+            cushion_prob: number;
+            /** Months P10 Below Cushion */
+            months_p10_below_cushion: number;
+        };
+        /** SimSummary */
+        SimSummary: {
+            /** End P50 */
+            end_p50: number;
+            /** Min P10 */
+            min_p10: number;
+            /** Overdraft Prob */
+            overdraft_prob: number;
+            /** Cushion Prob */
+            cushion_prob: number;
+            /** Months P10 Below Cushion */
+            months_p10_below_cushion: number;
+        };
+        /** SimulationResult */
+        SimulationResult: {
+            /** Profile Id */
+            profile_id: string;
+            /** Days */
+            days: number;
+            /** Horizon Months */
+            horizon_months: number;
+            /** Paths */
+            paths: number;
+            /** Cushion */
+            cushion: number;
+            baseline_summary: components["schemas"]["SimSummary"];
+            scenario_summary: components["schemas"]["SimSummary"];
+            diff: components["schemas"]["SimDiff"];
+            /** Baseline Monthly */
+            baseline_monthly: components["schemas"]["MonthEndPoint"][] | null;
+            /**
+             * Baseline Month Low P10
+             * @default []
+             */
+            baseline_month_low_p10?: number[];
+            /**
+             * Scenario Month Low P10
+             * @default []
+             */
+            scenario_month_low_p10?: number[];
+            /** Scenario Monthly */
+            scenario_monthly: components["schemas"]["MonthEndPoint"][] | null;
+            /** Flows */
+            flows: number;
+            plan?: components["schemas"]["StrategyResult"] | null;
+            /** Warnings */
+            warnings?: components["schemas"]["PayoffWarning"][];
+        };
+        /** SourceLine */
+        SourceLine: {
+            /** Figure */
+            figure: string;
+            /** Source Title */
+            source_title: string;
+            /** Fetched At */
+            fetched_at: string;
+            /** Url */
+            url: string;
+        };
+        /**
+         * SourceRef
+         * @description Where a figure came from: shown as title + date, with the url as a link.
+         */
+        SourceRef: {
+            /** Source Title */
+            source_title: string;
+            /** Url */
+            url: string;
+            /** Fetched At */
+            fetched_at: string;
         };
         /**
          * SpendingProfile
@@ -632,6 +1580,113 @@ export interface components {
             /** Top Categories */
             top_categories?: components["schemas"]["CategoryShare"][];
         };
+        /** Status */
+        Status: {
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "on_track" | "watch" | "at_risk";
+            /** Label */
+            label: string;
+            /** Note */
+            note: string;
+        };
+        /** StrategyResult */
+        StrategyResult: {
+            /** Code */
+            code: string;
+            /** Name */
+            name: string;
+            /** Order */
+            order: string[];
+            /** Extra Monthly */
+            extra_monthly: number;
+            /** Lump Sum */
+            lump_sum: number;
+            /** Lump Applied */
+            lump_applied: number;
+            /** Safe Lump Sum */
+            safe_lump_sum: number;
+            amortization: components["schemas"]["Amortization"];
+            /** Interest Saved Vs Minimum */
+            interest_saved_vs_minimum: number;
+            /** Months Saved Vs Minimum */
+            months_saved_vs_minimum: number | null;
+            /** Snowball Extra Cost */
+            snowball_extra_cost?: number | null;
+            cushion_impact?: components["schemas"]["CushionImpact"] | null;
+            /** Warnings */
+            warnings?: components["schemas"]["PayoffWarning"][];
+        };
+        /** StrategySummary */
+        StrategySummary: {
+            /** Code */
+            code: string;
+            /** Name */
+            name: string;
+            /** Months */
+            months: number | null;
+            /** Payoff Date */
+            payoff_date: string | null;
+            /** Total Interest */
+            total_interest: number;
+            /** Interest Saved */
+            interest_saved: number;
+            /** Months Saved */
+            months_saved: number | null;
+            /** Cushion Min P10 */
+            cushion_min_p10: number | null;
+            /** Cushion Min P10 Diff */
+            cushion_min_p10_diff: number | null;
+            /** Months P10 Below Cushion */
+            months_p10_below_cushion: number | null;
+            /** Months P10 Below Cushion Diff */
+            months_p10_below_cushion_diff: number | null;
+            /** Warnings */
+            warnings: components["schemas"]["PayoffWarning"][];
+        };
+        /** StreamDetail */
+        StreamDetail: {
+            /** Formula */
+            formula?: string | null;
+            /** Ms */
+            ms?: number | null;
+            /** Check */
+            check?: string | null;
+            /** Outcome */
+            outcome?: ("passed" | "retried" | "template") | null;
+            /** Cached */
+            cached?: boolean | null;
+        };
+        /**
+         * StreamEvent
+         * @description One server-sent event. type "progress": agent, phase, label and detail are set. type "result": `result` is the full AnalysisResult.
+         *     type "error": the run produced no result (label says so).
+         */
+        StreamEvent: {
+            /**
+             * Type
+             * @default progress
+             * @enum {string}
+             */
+            type?: "progress" | "result" | "error";
+            /** Run Id */
+            run_id: string;
+            /** Seq */
+            seq: number;
+            /** T Ms */
+            t_ms: number;
+            /** Agent */
+            agent?: ("orchestrator" | "compute" | "advisor" | "presenter" | "researcher") | null;
+            /** Phase */
+            phase?: ("start" | "step" | "done" | "error") | null;
+            /** Label */
+            label?: string | null;
+            /** @default {} */
+            detail?: components["schemas"]["StreamDetail"];
+            result?: components["schemas"]["AnalysisResult"] | null;
+        };
         /** Subscription */
         Subscription: {
             /** Name */
@@ -677,6 +1732,33 @@ export interface components {
             day: number;
             /** Events */
             events: number;
+        };
+        /**
+         * TraceStep
+         * @description One step of a run. `detail` holds flags, codes and counts only: never prompt text, model text or rejected arguments.
+         */
+        TraceStep: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "precompute" | "plan" | "plan_rejected" | "tool" | "rules" | "explain" | "advise" | "research" | "fallback" | "cache_hit";
+            /** Name */
+            name: string;
+            /**
+             * Ms
+             * @default 0
+             */
+            ms?: number;
+            /**
+             * Ok
+             * @default true
+             */
+            ok?: boolean;
+            /** Detail */
+            detail?: {
+                [key: string]: unknown;
+            };
         };
         /** Transaction */
         Transaction: {
@@ -802,197 +1884,6 @@ export interface components {
              */
             with_backtest?: boolean;
         };
-        /** Assumption */
-        Assumption: {
-            /** Value */
-            value: number;
-            /** Source */
-            source: string;
-            /** As Of */
-            as_of: string;
-        };
-        /**
-         * Backtest
-         * @description Rebuilt from the first 18 months only, forecast the rest, compared with the actual daily balance.
-         */
-        Backtest: {
-            /**
-             * Cutoff
-             * Format: date
-             */
-            cutoff: string;
-            /** Days */
-            days: number;
-            /** Avg Monthly Outflow */
-            avg_monthly_outflow: number;
-            /** Outflow Err 30D */
-            outflow_err_30d: number | null;
-            /** Outflow Err 90D */
-            outflow_err_90d: number | null;
-            /** Outflow Err 180D */
-            outflow_err_180d: number | null;
-            /** Net Change Err 30D */
-            net_change_err_30d: number | null;
-            /** Net Change Err 90D */
-            net_change_err_90d: number | null;
-            /** Net Change Err 180D */
-            net_change_err_180d: number | null;
-            /** Mape 30D */
-            mape_30d: number | null;
-            /** Mape 90D */
-            mape_90d: number | null;
-            /** Mape 180D */
-            mape_180d: number | null;
-            /** Band Coverage */
-            band_coverage: number | null;
-            /**
-             * Band Coverage Month End
-             * @default null
-             */
-            band_coverage_month_end?: number | null;
-            /**
-             * Known One Off
-             * @default null
-             */
-            known_one_off?: string | null;
-        };
-        /** ForecastEvent */
-        ForecastEvent: {
-            /**
-             * Day
-             * Format: date
-             */
-            day: string;
-            /**
-             * Kind
-             * @enum {string}
-             */
-            kind: "raise" | "rent_renewal" | "loan_ends" | "cd_matures" | "lump_sum" | "income_change" | "extra_paycheck" | "double_payment";
-            /** Description */
-            description: string;
-            /**
-             * Monthly Impact
-             * @default null
-             */
-            monthly_impact?: number | null;
-            /**
-             * Assumed Timing
-             * @default false
-             */
-            assumed_timing?: boolean;
-        };
-        /** LowPoint */
-        LowPoint: {
-            /**
-             * Day
-             * Format: date
-             */
-            day: string;
-            /** P50 */
-            p50: number;
-            /** P10 */
-            p10: number;
-        };
-        /** MonthEndPoint */
-        MonthEndPoint: {
-            /** Month */
-            month: string;
-            /**
-             * Day
-             * Format: date
-             */
-            day: string;
-            /** P10 */
-            p10: number;
-            /** P50 */
-            p50: number;
-            /** P90 */
-            p90: number;
-        };
-        /** MonthEndProbability */
-        MonthEndProbability: {
-            /** Month */
-            month: string;
-            /** Probability */
-            probability: number;
-        };
-        /** MonthlyNet */
-        MonthlyNet: {
-            /** Mean */
-            mean: number;
-            /** P10 */
-            p10: number;
-            /** P90 */
-            p90: number;
-        };
-        /** PercentileBands */
-        PercentileBands: {
-            /** P10 */
-            p10: number[];
-            /** P50 */
-            p50: number[];
-            /** P90 */
-            p90: number[];
-        };
-        /** Shortfall */
-        Shortfall: {
-            /** Buffer */
-            buffer: number;
-            /** Probability */
-            probability: number;
-            /** Probability 90D */
-            probability_90d: number;
-            /** First Date P50 */
-            first_date_p50: string | null;
-            /** First Date P10 */
-            first_date_p10: string | null;
-            /** Share Of Days Below */
-            share_of_days_below: number;
-            /** Last Date Below P50 */
-            last_date_below_p50: string | null;
-            /** Month End Probability By Month */
-            month_end_probability_by_month: components["schemas"]["MonthEndProbability"][];
-        };
-        /** LiquidForecast */
-        LiquidForecast: {
-            /** Profile Id */
-            profile_id: string;
-            /**
-             * As Of Date
-             * Format: date
-             */
-            as_of_date: string;
-            /** Horizon Months */
-            horizon_months: number;
-            /** Paths */
-            paths: number;
-            /** Start Liquid */
-            start_liquid: number;
-            daily: components["schemas"]["PercentileBands"] | null;
-            /** Monthly */
-            monthly: components["schemas"]["MonthEndPoint"][] | null;
-            low_point: components["schemas"]["LowPoint"];
-            overdraft_risk: components["schemas"]["Shortfall"];
-            cushion_risk: components["schemas"]["Shortfall"];
-            monthly_net: components["schemas"]["MonthlyNet"];
-            /** Drivers */
-            drivers: {
-                [key: string]: number;
-            };
-            /** Events */
-            events: components["schemas"]["ForecastEvent"][];
-            /** Assumptions */
-            assumptions: {
-                [key: string]: components["schemas"]["Assumption"];
-            };
-            /** @default null */
-            backtest?: components["schemas"]["Backtest"] | null;
-            /**
-             * Calibration
-             * @default null
-             */
-            calibration?: string | null;
-        };
         /** NoArgs */
         NoArgs: Record<string, never>;
         /** PaycheckToPaycheck */
@@ -1003,6 +1894,164 @@ export interface components {
             score: number;
             /** Reasons */
             reasons: string[];
+        };
+        /** WaterfallStep */
+        WaterfallStep: {
+            /** Step */
+            step: number;
+            /** Name */
+            name: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "done" | "in_progress" | "todo" | "not_applicable" | "unknown";
+            /** Target */
+            target: number | null;
+            /** Current */
+            current: number | null;
+            /** Gap */
+            gap: number | null;
+            /** Monthly Suggested */
+            monthly_suggested: number;
+            /** Reason Code */
+            reason_code: string;
+            /**
+             * Unit
+             * @default dollars
+             * @enum {string}
+             */
+            unit?: "dollars" | "dollars_per_month";
+            /** Detail */
+            detail?: {
+                [key: string]: unknown;
+            };
+        };
+        /** Waterfall */
+        Waterfall: {
+            /** Profile Id */
+            profile_id: string;
+            /** Surplus */
+            surplus: number;
+            /** Retirement Transfers */
+            retirement_transfers: number;
+            /** Free Surplus */
+            free_surplus: number;
+            /** Current Step */
+            current_step: number | "gap" | null;
+            /** First Open Step */
+            first_open_step: number | null;
+            /** Steps */
+            steps: components["schemas"]["WaterfallStep"][];
+            /** Unallocated */
+            unallocated: number;
+        };
+        /** PayoffArgs */
+        PayoffArgs: {
+            /**
+             * Lump Sum
+             * @description A one-time payment from existing cash, capped by the cushion floor
+             * @default 0
+             */
+            lump_sum?: number;
+            /**
+             * Extra Monthly
+             * @description Extra per month on top of minimums; omit to use the monthly surplus, 0 means none
+             * @default null
+             */
+            extra_monthly?: number | null;
+            /**
+             * Use Cd
+             * @description Consider breaking a CD to fund debt payments
+             * @default false
+             */
+            use_cd?: boolean;
+        };
+        /** CDOption */
+        CDOption: {
+            /** Account Id */
+            account_id: string;
+            /** Balance */
+            balance: number;
+            /** Rate */
+            rate: number;
+            /** Remaining Months */
+            remaining_months: number;
+            /** Penalty */
+            penalty: number;
+            /** Interest Saved */
+            interest_saved: number;
+            /** Interest Given Up */
+            interest_given_up: number;
+            /** Net Benefit */
+            net_benefit: number;
+            /** Recommend Break */
+            recommend_break: boolean;
+        };
+        /** PayoffItem */
+        PayoffItem: {
+            /** Account Id */
+            account_id: string;
+            /** Apr */
+            apr: number;
+            /** Balance */
+            balance: number;
+            /**
+             * Reason Code
+             * @enum {string}
+             */
+            reason_code: "high_apr" | "optional" | "mortgage_extra";
+        };
+        /** PlanOutcome */
+        PlanOutcome: {
+            /** Months */
+            months: number | null;
+            /** Total Interest */
+            total_interest: number;
+        };
+        /** PayoffPriority */
+        PayoffPriority: {
+            /** Profile Id */
+            profile_id: string;
+            /** Order */
+            order: components["schemas"]["PayoffItem"][];
+            /** Safe Lump Sum */
+            safe_lump_sum: number;
+            /** Safe Lump Sum Low Cushion */
+            safe_lump_sum_low_cushion: number | null;
+            /** Lump Sum Applied */
+            lump_sum_applied: number;
+            /** Extra Monthly Applied */
+            extra_monthly_applied: number;
+            avalanche: components["schemas"]["PlanOutcome"] | null;
+            snowball: components["schemas"]["PlanOutcome"] | null;
+            /** Snowball Extra Cost */
+            snowball_extra_cost: number | null;
+            cd: components["schemas"]["CDOption"] | null;
+            /** Flags */
+            flags: string[];
+        };
+        /** CandidateMove */
+        CandidateMove: {
+            /** Move Code */
+            move_code: string;
+            /** Priority */
+            priority: number;
+            /** Addresses Current Step */
+            addresses_current_step: boolean;
+            /** Facts */
+            facts: {
+                [key: string]: unknown;
+            };
+        };
+        /** CandidateMoves */
+        CandidateMoves: {
+            /** Profile Id */
+            profile_id: string;
+            /** Current Step */
+            current_step: number | "gap" | null;
+            /** Moves */
+            moves: components["schemas"]["CandidateMove"][];
         };
         /** JobLossArgs */
         JobLossArgs: {
@@ -1108,6 +2157,315 @@ export interface components {
                     [key: string]: unknown;
                 };
             };
+        };
+        /** PayoffStrategiesArgs */
+        PayoffStrategiesArgs: {
+            /**
+             * Extra Monthly
+             * @description Extra per month on top of minimums; omit to use the monthly surplus, 0 means none
+             * @default null
+             */
+            extra_monthly?: number | null;
+            /**
+             * Lump Sum
+             * @description One-time payment from cash at month 0; omit to use the safe lump sum, 0 means none
+             * @default null
+             */
+            lump_sum?: number | null;
+            /**
+             * Include Mortgage
+             * @description Count the mortgage as a debt to pay down
+             * @default false
+             */
+            include_mortgage?: boolean;
+        };
+        /** ComparisonRow */
+        ComparisonRow: {
+            /** Code */
+            code: string;
+            /** Name */
+            name: string;
+            /** Months */
+            months: number | null;
+            /** Total Interest */
+            total_interest: number;
+            /** Interest Saved */
+            interest_saved: number;
+            /** Cushion Min P10 */
+            cushion_min_p10: number | null;
+            /** Months P10 Below Cushion */
+            months_p10_below_cushion: number | null;
+        };
+        /** Debt */
+        Debt: {
+            /** Id */
+            id: string;
+            /**
+             * Type
+             * @default personal_loan
+             */
+            type?: string;
+            /**
+             * Kind
+             * @default loan
+             * @enum {string}
+             */
+            kind?: "card" | "loan";
+            /** Apr */
+            apr: number;
+            /** Balance */
+            balance: number;
+            /**
+             * Fixed Min
+             * @default null
+             */
+            fixed_min?: number | null;
+            /**
+             * Card Min Pct
+             * @default null
+             */
+            card_min_pct?: number | null;
+            /**
+             * Card Min Floor
+             * @default null
+             */
+            card_min_floor?: number | null;
+            /**
+             * Min Source
+             * @default given
+             */
+            min_source?: string;
+            /**
+             * Term Months Remaining
+             * @default null
+             */
+            term_months_remaining?: number | null;
+        };
+        /** PayoffStrategies */
+        PayoffStrategies: {
+            /** Profile Id */
+            profile_id: string;
+            /** No Debt */
+            no_debt: boolean;
+            /** No Surplus */
+            no_surplus: boolean;
+            /** Flags */
+            flags: string[];
+            /** Include Mortgage */
+            include_mortgage: boolean;
+            /** Excluded Mortgages */
+            excluded_mortgages: string[];
+            /** Debts */
+            debts: components["schemas"]["Debt"][];
+            /** Extra Monthly */
+            extra_monthly: number;
+            /** Safe Lump Sum */
+            safe_lump_sum: number;
+            /** Lump Sum */
+            lump_sum: number;
+            /** Strategies */
+            strategies: {
+                [key: string]: components["schemas"]["StrategyResult"];
+            };
+            /** Comparison */
+            comparison: components["schemas"]["ComparisonRow"][];
+            recommended: components["schemas"]["Recommendation"] | null;
+            /** Snowball Extra Cost */
+            snowball_extra_cost: number | null;
+            /** Cushion */
+            cushion: number | null;
+            /** Paths */
+            paths: number | null;
+            /** Runtime Ms */
+            runtime_ms: number;
+        };
+        /** PayoffStrategiesSummary */
+        PayoffStrategiesSummary: {
+            /** Profile Id */
+            profile_id: string;
+            /** No Debt */
+            no_debt: boolean;
+            /** No Surplus */
+            no_surplus: boolean;
+            /** Extra Monthly */
+            extra_monthly: number;
+            /** Lump Sum */
+            lump_sum: number;
+            /** Safe Lump Sum */
+            safe_lump_sum: number;
+            recommended: components["schemas"]["Recommendation"] | null;
+            /** Snowball Extra Cost */
+            snowball_extra_cost: number | null;
+            /** Strategies */
+            strategies: components["schemas"]["StrategySummary"][];
+            /** Cushion */
+            cushion: number | null;
+            /**
+             * Excluded Mortgages
+             * @default []
+             */
+            excluded_mortgages?: string[];
+            /**
+             * Highest Debt Apr
+             * @default null
+             */
+            highest_debt_apr?: number | null;
+            /**
+             * Highest Debt Type
+             * @default null
+             */
+            highest_debt_type?: string | null;
+            /**
+             * Savings Rate
+             * @default null
+             */
+            savings_rate?: number | null;
+            /**
+             * Holds Hys
+             * @default false
+             */
+            holds_hys?: boolean;
+        };
+        /** AddLoan */
+        AddLoan: {
+            /** Principal */
+            principal: number;
+            /**
+             * Apr
+             * @description Decimal: 0.07 = 7%
+             */
+            apr: number;
+            /** Term Months */
+            term_months: number;
+            /**
+             * Start Month
+             * @description Month the loan starts (0 = tomorrow); the first payment is a month later
+             * @default 1
+             */
+            start_month?: number;
+            /**
+             * Disbursed To Cash
+             * @description True: the principal lands in checking. False: it is spent elsewhere (a car, a house)
+             * @default true
+             */
+            disbursed_to_cash?: boolean;
+        };
+        /** ExpenseChange */
+        ExpenseChange: {
+            /**
+             * Monthly Delta
+             * @description Change in monthly spending: positive spends more, negative spends less
+             */
+            monthly_delta: number;
+            /**
+             * Start Month
+             * @description First month it applies (1 = the month after today)
+             * @default 1
+             */
+            start_month?: number;
+            /**
+             * End Month
+             * @description Last month it applies; omit for the whole horizon
+             * @default null
+             */
+            end_month?: number | null;
+        };
+        /** Scenario */
+        Scenario: {
+            /**
+             * Extra Monthly
+             * @description Extra per month toward debt (with a payoff_strategy: None = the surplus)
+             * @default null
+             */
+            extra_monthly?: number | null;
+            /** @default null */
+            expense_change?: components["schemas"]["ExpenseChange"] | null;
+            /** @default null */
+            add_loan?: components["schemas"]["AddLoan"] | null;
+            /**
+             * Lump Sum
+             * @description One-time payment toward debt from cash at month 0 (with a payoff_strategy: None = safe lump sum)
+             * @default null
+             */
+            lump_sum?: number | null;
+            /**
+             * Purchase Now
+             * @description One-time spending from cash at month 0 (a car bought with cash, or a down payment)
+             * @default null
+             */
+            purchase_now?: number | null;
+            /**
+             * Payoff Strategy
+             * @description A avalanche, B snowball, C lump sum, D lump then avalanche, E minimums only, F custom
+             * @default null
+             */
+            payoff_strategy?: string | null;
+        };
+        /** SimulationSummary */
+        SimulationSummary: {
+            /** Profile Id */
+            profile_id: string;
+            /** Horizon Months */
+            horizon_months: number;
+            /** Cushion */
+            cushion: number;
+            baseline: components["schemas"]["SimSummary"];
+            scenario: components["schemas"]["SimSummary"];
+            diff: components["schemas"]["SimDiff"];
+            /** Flows */
+            flows: number;
+            payoff: components["schemas"]["StrategySummary"] | null;
+            /** Warnings */
+            warnings: components["schemas"]["PayoffWarning"][];
+        };
+        /** SimulatePayoffArgs */
+        SimulatePayoffArgs: {
+            /**
+             * Strategy
+             * @description Omit to use the recommended strategy (A if none). A avalanche, B snowball, C lump sum then minimums, D lump sum then avalanche, E minimums only, F custom
+             * @default null
+             */
+            strategy?: ("A" | "B" | "C" | "D" | "E" | "F") | null;
+            /**
+             * Extra Monthly
+             * @description Extra per month on top of minimums; omit to use the monthly surplus, 0 means none
+             * @default null
+             */
+            extra_monthly?: number | null;
+            /**
+             * Lump Sum
+             * @description One-time payment from cash at month 0; omit to use the safe lump sum, 0 means none
+             * @default null
+             */
+            lump_sum?: number | null;
+            /**
+             * Order
+             * @description Account ids in the order extra money should go (strategy F)
+             * @default null
+             */
+            order?: string[] | null;
+            /**
+             * Include Mortgage
+             * @description Count the mortgage as a debt to pay down (it is left out by default)
+             * @default false
+             */
+            include_mortgage?: boolean;
+        };
+        /** PayoffSimulationSummary */
+        PayoffSimulationSummary: {
+            /** No Debt */
+            no_debt: boolean;
+            strategy: components["schemas"]["StrategySummary"] | null;
+            simulation: components["schemas"]["SimulationSummary"] | null;
+        };
+        /** BuyPlansArgs */
+        BuyPlansArgs: {
+            /**
+             * Vehicle Id
+             * @description A vehicle id from the research pack, e.g. honda_crv; omit for the cheapest car with a cited price
+             * @default null
+             */
+            vehicle_id?: string | null;
         };
     };
     responses: never;
@@ -1392,6 +2750,203 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_event_api_me_agent__event__post: {
+        parameters: {
+            query?: {
+                refresh?: number;
+            };
+            header?: never;
+            path: {
+                event: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisResult"];
+                };
+            };
+            /** @description A newer run for the same event replaced this one. Expected: ignore it and use the newer run's result. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description The run took too long before anything could be returned. */
+            504: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    run_event_stream_api_me_agent__event__stream_post: {
+        parameters: {
+            query?: {
+                refresh?: number;
+            };
+            header?: never;
+            path: {
+                event: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description text/event-stream. One StreamEvent per `data:` line (event: progress), then a final event of type result (the full AnalysisResult) or error. A cached result replays its stored steps with detail.cached; a run in flight is joined. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StreamEvent"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    my_profile_api_me_profile_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Profile"];
+                };
+            };
+        };
+    };
+    my_transactions_api_me_transactions_get: {
+        parameters: {
+            query?: {
+                category?: string | null;
+                flow_class?: string | null;
+                start?: string | null;
+                end?: string | null;
+                q?: string | null;
+                page?: number;
+                page_size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TransactionPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    my_forecast_api_me_forecast_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LiquidForecast"];
+                };
+            };
+        };
+    };
+    my_status_api_me_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Status"];
+                };
+            };
+        };
+    };
+    my_recurring_api_me_recurring_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecurringItem"][];
                 };
             };
         };

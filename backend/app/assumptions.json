@@ -53,5 +53,150 @@
     "value": 3,
     "source": "Design choice: 3 months of essential expenses is the common minimum rule of thumb; the formula takes the target as an argument (6 is typical for one-earner or variable-income households).",
     "as_of": "2026-11-07"
+  },
+  "starter_cushion": {
+    "value": 1000,
+    "source": "docs/rules.md section 6. Common personal-finance guideline for a starter emergency fund ($1,000), capped at one month of essentials when that is smaller. Not independently re-verified.",
+    "as_of": "2026-11-08"
+  },
+  "high_apr_threshold": {
+    "value": 0.08,
+    "source": "docs/rules.md section 6. Design choice: above a typical long-run expected investment return, paying down debt is the better guaranteed return.",
+    "as_of": "2026-11-08"
+  },
+  "cushion_months": {
+    "value": 3,
+    "source": "docs/rules.md section 6. Widely used planner guideline (3-6 months of essentials), lower end. Same figure as emergency_fund_months, which the job-loss stress test uses; kept as a separate key so the two can diverge.",
+    "as_of": "2026-11-08"
+  },
+  "cushion_months_high": {
+    "value": 6,
+    "source": "docs/rules.md section 6. Upper end of the same 3-6 month guideline, for less stable situations: a paycheck-to-paycheck flag or dependents under the age limit.",
+    "as_of": "2026-11-08"
+  },
+  "retirement_target_pct": {
+    "value": 0.15,
+    "source": "docs/rules.md section 6. Common retirement guideline of saving 15% of gross income including employer match (e.g. Fidelity's 15% guideline). Not independently re-verified.",
+    "as_of": "2026-11-08"
+  },
+  "card_low_cushion_apr": {
+    "value": 0.2,
+    "source": "docs/rules.md section 6. Design choice: card interest at this level outweighs the risk of a thinner cushion, so a lump sum may go down to low_cushion_months, with a tradeoff flag.",
+    "as_of": "2026-11-08"
+  },
+  "low_cushion_months": {
+    "value": 1,
+    "source": "docs/rules.md section 6. Floor for the card exception: one month of essentials.",
+    "as_of": "2026-11-08"
+  },
+  "mortgage_extra_rate": {
+    "value": 0.065,
+    "source": "docs/rules.md section 6. Design choice: only mortgage rates above this compete with safe returns and investing, so extra mortgage payments are considered only above it (and only once waterfall steps 1-5 are done).",
+    "as_of": "2026-11-08"
+  },
+  "safe_savings_rate": {
+    "value": 0.0372,
+    "source": "docs/rules.md section 6. High-yield savings rate used across the app. DATASET-DERIVED, not a market quote: the median rate of the 22 high-yield savings accounts in the generated data (range 3.44%-4.14%), as of 2026-10-31. Check against current national high-yield savings averages before publishing.",
+    "as_of": "2026-11-08"
+  },
+  "snowball_small_balance": {
+    "value": 2000,
+    "source": "docs/rules.md section 6. Design choice for 'several small debts': a debt under this balance counts as small.",
+    "as_of": "2026-11-08"
+  },
+  "snowball_min_count": {
+    "value": 3,
+    "source": "docs/rules.md section 6. Design choice: the snowball alternative is computed when at least this many debts are small.",
+    "as_of": "2026-11-08"
+  },
+  "idle_cash_months": {
+    "value": 6,
+    "source": "docs/rules.md section 6. Design choice for 'more cash than needed': total liquid cash above this many months of essentials.",
+    "as_of": "2026-11-08"
+  },
+  "idle_checking_months": {
+    "value": 2,
+    "source": "docs/rules.md section 6. Design choice for 'more cash than needed': checking balance above this many months of essentials.",
+    "as_of": "2026-11-08"
+  },
+  "cd_review_months": {
+    "value": 6,
+    "source": "docs/rules.md section 6. Design choice: review a CD that matures within this many months.",
+    "as_of": "2026-11-08"
+  },
+  "secured_card_score_max": {
+    "value": 580,
+    "source": "Design choice: below this score the credit-building move suggests a secured card (one backed by a refundable deposit), since many issuers decline unsecured cards at that level. 580 is the top of FICO's published 'poor' band (300-579) rounded to the usual cutoff; recalled from FICO's published ranges, not re-verified.",
+    "as_of": "2026-11-08"
+  },
+  "credit_building_score": {
+    "value": 620,
+    "source": "docs/rules.md section 6. Approximate subprime cutoff used by many lenders.",
+    "as_of": "2026-11-08"
+  },
+  "dependent_age_limit": {
+    "value": 18,
+    "source": "docs/rules.md section 1 ('dependents under 18'): a dependent younger than this counts toward the 6-month cushion and the education step.",
+    "as_of": "2026-11-08"
+  },
+  "freed_payment_days": {
+    "value": 90,
+    "source": "docs/rules.md section 3 (recently_freed_payment): a debt closed within, or a loan ending within, this many days. Look-ahead/look-back window chosen to match the 90-day forecast detail.",
+    "as_of": "2026-11-08"
+  },
+  "extra_paycheck_days": {
+    "value": 90,
+    "source": "docs/rules.md section 3 (use_extra_paycheck): a three-paycheck month within this many days.",
+    "as_of": "2026-11-08"
+  },
+  "promo_expiry_days": {
+    "value": 90,
+    "source": "docs/rules.md section 2 (promo_rate_expiring): flag a promotional-rate debt whose promotion ends within this many days. Same 90-day window as the other look-aheads. The dataset has no promotional debts yet.",
+    "as_of": "2026-11-08"
+  },
+  "automate_coverage_min": {
+    "value": 0.5,
+    "source": "Design choice (docs/rules.md section 3, automate_savings): suggest automating savings when regular savings transfers cover less than this share of the monthly surplus.",
+    "as_of": "2026-11-08"
+  },
+  "retiree_investment_cover_months": {
+    "value": 12,
+    "source": "Design choice (docs/rules.md section 1, step 4): a retiree whose retirement/investment accounts cover at least this many months of essentials has a drawdown backstop, so a thin cash cushion is not flagged. Withdrawals may be taxable; this is a planning simplification, not tax advice.",
+    "as_of": "2026-11-08"
+  },
+  "card_min_pct": {
+    "value": 0.01,
+    "source": "Design choice for the payoff simulator: the common issuer minimum of 1% of the balance plus the month's interest (many issuers state it this way; some use 2% of balance, which would pay down faster). Not independently re-verified against a specific issuer.",
+    "as_of": "2026-11-08"
+  },
+  "card_min_floor": {
+    "value": 25,
+    "source": "Design choice for the payoff simulator: the usual dollar floor on a card's minimum payment ($25-$35 across large issuers). Not independently re-verified against a specific issuer.",
+    "as_of": "2026-11-08"
+  },
+  "payoff_max_months": {
+    "value": 360,
+    "source": "Design choice: payoff simulations stop after 30 years; a plan that has not cleared the debt by then is reported as not paying off (a minimum-only card can take longer).",
+    "as_of": "2026-11-08"
+  },
+  "cushion_warn_min_shortfall": {
+    "value": 100,
+    "source": "Design choice for the payoff simulator: a tradeoff_low_cushion warning needs the p10 shortfall below the cushion target to exceed the larger of this many dollars and cushion_warn_min_shortfall_pct of the target, so a dip of a few dollars does not raise a warning. months_p10_below_cushion still reports the raw count.",
+    "as_of": "2026-11-08"
+  },
+  "cushion_warn_min_shortfall_pct": {
+    "value": 0.02,
+    "source": "Design choice, the percentage half of cushion_warn_min_shortfall: 2% of the cushion target.",
+    "as_of": "2026-11-08"
+  },
+  "car_loan_term_months": {
+    "value": 60,
+    "source": "Modelling choice for the Buy plans: a 60-month auto loan. Bankrate and Experian report 60-72 month terms as the common range; the rates in research/cars.json are not term-specific.",
+    "as_of": "2026-11-08"
+  },
+  "car_payment_max_share_of_gross": {
+    "value": 0.1,
+    "source": "Product rule for the Buy verdict: a monthly car payment at or under 10% of gross monthly income counts as affordable.",
+    "as_of": "2026-11-08"
   }
 }

@@ -6,15 +6,16 @@ from .. import config
 from ..auth import current_user
 from ..data import loader
 from ..formulas import forecast
-from .schemas import AssumptionsResponse, Health
+from ..llm.health import llm_health
+from .schemas import AssumptionsResponse, Health, LLMHealth
 
 router = APIRouter(prefix="/api", tags=["meta"])
 
 
 @router.get("/health", response_model=Health)
-def health() -> Health:
+async def health() -> Health:
     return Health(status="ok", profiles_loaded=len(loader.load_profiles()), as_of=config.AS_OF_DATE.isoformat(),
-                  data_hash=loader.cache_key()[:12])
+                  data_hash=loader.cache_key()[:12], llm=LLMHealth(**await llm_health()))
 
 
 @router.get("/assumptions", response_model=AssumptionsResponse, dependencies=[Depends(current_user)])

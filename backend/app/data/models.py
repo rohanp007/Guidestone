@@ -339,6 +339,8 @@ class LiquidForecast(Base):
     start_liquid: float
     daily: PercentileBands | None          # days 0-90 (91 values); None in the summary version
     monthly: list[MonthEndPoint] | None    # month-end balances; None in the summary version
+    end_balance: MonthEndPoint | None = None          # month-end balance at the end of the horizon (kept in the summary version)
+    balance_12m: MonthEndPoint | None = None          # ...at month 12, when the horizon is at least 12 months (the common question)
     low_point: LowPoint
     overdraft_risk: Shortfall              # buffer $0: a true emergency, drives the urgent alert
     cushion_risk: Shortfall                # buffer = one month of essential expenses: the default risk indicator ("below a safe cushion in March")

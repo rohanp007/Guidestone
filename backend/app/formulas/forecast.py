@@ -17,7 +17,8 @@ import hashlib
 import json
 import os
 import pickle
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from collections.abc import Sequence
 from datetime import date, timedelta
 from functools import lru_cache
 from pathlib import Path
@@ -27,7 +28,7 @@ import pandas as pd
 
 from ..config import ASSUMPTIONS_PATH, DATA_DIR, assumptions as load_assumptions
 from ..data import derive, loader
-from ..data.models import (Assumption, Backtest, Base, ForecastChange, ForecastEvent, LiquidForecast, LowPoint, MonthEndPoint,
+from ..data.models import (Account, Assumption, Backtest, Base, ForecastChange, ForecastEvent, LiquidForecast, LowPoint, MonthEndPoint,
                            MonthEndProbability, MonthlyNet, PercentileBands, Profile, Recurring, Shortfall)
 from pydantic import Field
 
@@ -78,6 +79,27 @@ def next_bd(d: date) -> date:
 def _seed(*parts) -> int:
     """Stable across runs and machines (Python's hash() is not)."""
     return int.from_bytes(hashlib.sha256("|".join(map(str, parts)).encode()).digest()[:4], "big")
+
+
+@dataclass(frozen=True)
+class Flow:
+    """A dated, deterministic cash flow added to the schedule (signed: negative leaves the account). Passed in `changes` next to
+    ForecastChange. `replaces` names a debt account: its existing recurring payment (loan_payment / card_payment) is removed from
+    the schedule, so the flows that replace it are never counted on top of it. A card that is replaced stops being carried by the
+    card model: only its new purchases are paid, and the old balance is paid by the flows."""
+    day: date
+    amount: float
+    description: str = ""
+    kind: str = "scenario"
+    replaces: str | None = None
+
+
+def debt_account(profile: Profile, r: Recurring) -> Account | None:
+    """The liability a recurring loan / card payment services (same matching the schedule has always used for loans)."""
+    if r.kind == "card_payment":
+        return next((a for a in profile.accounts if a.type == "credit_card"), None)
+    t = _LOAN_TYPE.get(next((k for k in _LOAN_TYPE if k in r.description), ""), "")
+    return next((a for a in profile.accounts if a.type == t), None)
 
 
 # ------------------------------------------------------------------ 1. the deterministic schedule
@@ -133,7 +155,7 @@ def _occurrences(r: Recurring, as_of: date, end: date, is_income: bool) -> list[
     return [d for d in out if as_of < d <= end]
 
 
-def build_schedule(profile: Profile, horizon_months: int, A: dict[str, float], changes: list[ForecastChange] | None = None,
+def build_schedule(profile: Profile, horizon_months: int, A: dict[str, float], changes: Sequence[ForecastChange | Flow] | None = None,
                    simulate_card: bool = False) -> Schedule:
     as_of = profile.as_of_date
     end = month_end(add_months(as_of, horizon_months))
@@ -143,6 +165,7 @@ def build_schedule(profile: Profile, horizon_months: int, A: dict[str, float], c
     bump = A["rent_renewal_bump"]
     months_since = lambda d: (d.year - as_of.year) * 12 + d.month - as_of.month
 
+    replaced = {c.replaces for c in changes or [] if isinstance(c, Flow) and c.replaces}     # debts whose payments the flows take over
     income_monthly = rent_monthly = 0.0
     for r in profile.recurring:
         kind = _KIND.get(r.kind)
@@ -153,10 +176,12 @@ def build_schedule(profile: Profile, horizon_months: int, A: dict[str, float], c
         if kind == "card_payment" and simulate_card:
             sch.card_dates = dates                              # the payment depends on simulated card spending: see _simulate
             continue
+        if replaced and kind in ("debt_payment", "card_payment") and getattr(debt_account(profile, r), "id", None) in replaced:
+            continue                                            # replaced by Flow(s): drop the recurring payment, its events and its end
         per_event = r.monthly_amount / (2.0 if (r.cadence == "semimonthly" and is_income) else r.occurrences_per_month if r.cadence == "biweekly" else 1.0)
 
         if kind == "debt_payment":
-            acct = next((a for a in profile.accounts if a.type == _LOAN_TYPE.get(next((k for k in _LOAN_TYPE if k in r.description), ""), "")), None)
+            acct = debt_account(profile, r)
             if acct is not None and acct.term_months_remaining is not None:
                 left = max(1, acct.term_months_remaining)
                 if left < len(dates):
@@ -203,6 +228,10 @@ def build_schedule(profile: Profile, horizon_months: int, A: dict[str, float], c
             m = add_months(m, a.term_months)
 
     for c in changes or []:
+        if isinstance(c, Flow):
+            if as_of < c.day <= end:                            # flows are generated generically; those past the horizon are dropped
+                sch.cash.append([c.day, c.kind, c.amount, c.description or c.kind, None])
+            continue
         if c.type not in ("lump_sum", "income_change"):
             raise NotImplementedError(f"ForecastChange type {c.type!r} is not implemented yet")
         start = c.day or as_of + timedelta(days=1)
@@ -257,6 +286,7 @@ class Card:
     paydown: float             # share of the carried balance paid down each month
     share: float               # card purchases / all variable spend
     start_balance: float
+    account_id: str = ""
 
 
 def _card(profile: Profile) -> Card | None:
@@ -268,7 +298,7 @@ def _card(profile: Profile) -> Card | None:
     months = max(1, len(profile.history))
     avg = max(1.0, (acct.opening_balance + acct.balance) / 2)
     paydown = float(np.clip((acct.opening_balance - acct.balance) / (months * avg), *PAYDOWN_RANGE))
-    return Card(profile.spending.carries_card_balance, acct.rate, paydown, profile.spending.card_share, acct.balance)
+    return Card(profile.spending.carries_card_balance, acct.rate, paydown, profile.spending.card_share, acct.balance, acct.id)
 
 
 # ------------------------------------------------------------------ 2-3. variable spend + paths
@@ -286,7 +316,7 @@ class Sim:
 
 
 def _simulate(profile: Profile, horizon_months: int, paths: int, cushion: float, seed: int, A: dict[str, float],
-              changes: list[ForecastChange] | None, risk_factors: list[float] | None = None,
+              changes: Sequence[ForecastChange | Flow] | None, risk_factors: list[float] | None = None,
               income_scale: np.ndarray | None = None) -> Sim:
     """`risk_factors` are the calibration's month-end band factors. When given, the risk probabilities are computed on paths whose
     deviation from the median path is scaled by the factor interpolated for that day; the returned percentiles stay RAW (the
@@ -298,6 +328,8 @@ def _simulate(profile: Profile, horizon_months: int, paths: int, cushion: float,
         raise ValueError(f"{profile.id}: needs derive.enrich() first")
     sp = profile.spending
     card = _card(profile) if OPTIONS["total_spend"] and sp.monthly_total_samples else None
+    if card and any(isinstance(c, Flow) and c.replaces == card.account_id for c in changes or []):
+        card = replace(card, revolver=False, start_balance=0.0)      # Flows pay the old balance: the card model pays new purchases only
     sch = build_schedule(profile, horizon_months, A, changes, simulate_card=card is not None)
     D, M = sch.days, len(sch.month_ends)
     rng = np.random.default_rng(seed)
@@ -428,14 +460,28 @@ def _used_assumptions(profile: Profile, A_all: dict[str, dict], sch: Schedule) -
     return {n: Assumption(**A_all[n]) for n in names}
 
 
-def _summarize(profile: Profile, sim: Sim, horizon_months: int, A_all: dict[str, dict]) -> LiquidForecast:
+def no_narrowing(p50: np.ndarray, p10: np.ndarray, p90: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Bands that never get narrower as the horizon grows. The calibration factors are fit per horizon bucket and interpolated between
+    anchors (day 30, 90, 180); the short-horizon factor is large (the raw band is tiny there), so a calibrated band could be wider at
+    day 30 than at day 90. Uncertainty about the future cannot shrink with distance, so each day's width is at least the widest earlier
+    width (both sides scaled alike, keeping the band's shape). This can only widen a band, so the calibrated coverage stays at or above
+    what the backtest measured."""
+    width = p90 - p10
+    widest = np.maximum.accumulate(width)
+    lower = np.divide(p50 - p10, width, out=np.full_like(width, np.nan), where=width > 1e-9)       # the share of the band below the median
+    idx = np.maximum.accumulate(np.where(np.isnan(lower), 0, np.arange(len(lower))))                # forward-fill it across zero-width days
+    lower = np.where(np.isnan(lower[idx]), 0.5, lower[idx])
+    return p50 - widest * lower, p50 + widest * (1 - lower)
+
+
+def _summarize(profile: Profile, sim: Sim, horizon_months: int, A_all: dict[str, dict], daily_days: int = DAILY_DAYS) -> LiquidForecast:
     sch, p10, p50, p90 = sim.schedule, *sim.pct
     cal = _calibration() if OPTIONS["calibrate"] else None
     p10d, p90d, p10m, p90m = p10, p90, p10, p90                # daily-chart bands and monthly-chart bands
     if cal:                                                    # scale the bands around the median by the horizon's factor
         fd, fm = band_factors(cal["daily_factors"], sch.days), band_factors(cal["month_end_factors"], sch.days)
-        p10d, p90d = p50 - (p50 - p10) * fd, p50 + (p90 - p50) * fd
-        p10m, p90m = p50 - (p50 - p10) * fm, p50 + (p90 - p50) * fm
+        p10d, p90d = no_narrowing(p50, p50 - (p50 - p10) * fd, p50 + (p90 - p50) * fd)
+        p10m, p90m = no_narrowing(p50, p50 - (p50 - p10) * fm, p50 + (p90 - p50) * fm)
     day = lambda i: sch.as_of + timedelta(days=int(i))
     risk = lambda name: Shortfall(buffer=sim.risks[name][0], probability=sim.risks[name][1], probability_90d=sim.risks[name][2],
                                   first_date_p50=_first_below(p50, sim.risks[name][0], sch.as_of),
@@ -456,11 +502,13 @@ def _summarize(profile: Profile, sim: Sim, horizon_months: int, A_all: dict[str,
     drivers["variable_spend_median"] = -sim.month1_variable
     drivers["interest"] = sim.month1_interest
 
+    monthly = [MonthEndPoint(month=me.strftime("%Y-%m"), day=me, p10=float(p10m[i]), p50=float(p50[i]), p90=float(p90m[i]))
+               for me, i in zip(sch.month_ends, me_idx)]
     return LiquidForecast(
         profile_id=profile.id, as_of_date=sch.as_of, horizon_months=horizon_months, paths=sim.paths, start_liquid=sim.start_liquid,
-        daily=PercentileBands(p10=p10d[:DAILY_DAYS + 1].tolist(), p50=p50[:DAILY_DAYS + 1].tolist(), p90=p90d[:DAILY_DAYS + 1].tolist()),
-        monthly=[MonthEndPoint(month=me.strftime("%Y-%m"), day=me, p10=float(p10m[i]), p50=float(p50[i]), p90=float(p90m[i]))
-                 for me, i in zip(sch.month_ends, me_idx)],
+        end_balance=monthly[-1], balance_12m=monthly[11] if len(monthly) >= 12 else None,
+        daily=PercentileBands(p10=p10d[:daily_days + 1].tolist(), p50=p50[:daily_days + 1].tolist(), p90=p90d[:daily_days + 1].tolist()),
+        monthly=monthly,
         low_point=LowPoint(day=day(low), p50=float(p50[low]), p10=float(p10d[low])),
         overdraft_risk=risk("overdraft"), cushion_risk=risk("cushion"),
         monthly_net=MonthlyNet(mean=float(sim.net_per_month.mean()), p10=float(np.percentile(sim.net_per_month, 10)),
@@ -687,7 +735,7 @@ def backtest_for(profile: Profile) -> Backtest | None:
 
 # ------------------------------------------------------------------ 6. formulas
 def _forecast(profile: Profile, horizon_months: int, paths: int | None, cushion: float | None, seed: int,
-              changes: list[ForecastChange] | None, with_backtest: bool) -> LiquidForecast:
+              changes: list[ForecastChange] | None, with_backtest: bool, daily_days: int = DAILY_DAYS) -> LiquidForecast:
     A_all = load_assumptions()
     A = {k: v["value"] for k, v in A_all.items()}
     paths = int(paths or A["forecast_paths"])
@@ -695,7 +743,7 @@ def _forecast(profile: Profile, horizon_months: int, paths: int | None, cushion:
     cushion = essential_monthly(profile) if cushion is None else cushion
     cal = _calibration() if OPTIONS["calibrate"] else None
     out = _summarize(profile, _simulate(profile, horizon_months, paths, cushion, key, A, changes, cal["month_end_factors"] if cal else None),
-                     horizon_months, A_all)
+                     horizon_months, A_all, daily_days)
     if with_backtest:
         out = out.model_copy(update={"backtest": backtest_for(profile)})
     return out
@@ -719,6 +767,12 @@ def forecast_liquid(profile: Profile, *, horizon_months: int = DEFAULT_HORIZON_M
     Two risk outputs: `overdraft_risk` (balance below $0, the urgent alert) and `cushion_risk` (below `cushion`, default one
     month of essential expenses; the default health indicator)."""
     return _forecast(profile, horizon_months, paths, cushion, seed, changes, with_backtest)
+
+
+def forecast_for_chart(profile: Profile, horizon_months: int) -> LiquidForecast:
+    """The same forecast as forecast_liquid (identical numbers, default arguments), but with a daily band for the whole horizon instead of
+    the first DAILY_DAYS days, so a chart can plot one resolution throughout. Not registered: it is not a tool for the agents."""
+    return _forecast(profile, horizon_months, None, None, 0, None, False, daily_days=horizon_months * 31)
 
 
 @register("forecast_liquid_summary", args=ForecastArgs, result=LiquidForecast, category="forecast")

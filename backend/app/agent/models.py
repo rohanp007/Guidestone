@@ -1,0 +1,192 @@
+"""Orchestrator data shapes."""
+from __future__ import annotations
+
+from typing import Any, Literal
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from ..engine.simulate import PayoffSimulation
+from ..formulas.buy import BuyPlans, SourceRef
+from ..formulas.payoff import Recommendation, StrategySummary
+from ..research.sanitize import BuyQuery
+
+MAX_STEPS = 4
+REASON_MAX = 80
+
+
+class PlanStep(BaseModel):
+    tool: str
+    args: dict[str, Any] = Field(default_factory=dict)
+    reason: str = Field("", description="A short phrase: why this calculation could change what the customer should do")
+
+    @field_validator("reason", mode="before")
+    @classmethod
+    def _short(cls, v: Any) -> Any:
+        return v[:REASON_MAX] if isinstance(v, str) else v
+
+
+class Plan(BaseModel):
+    """What the planner returns: at most MAX_STEPS steps (enforced in code, so a long plan loses its extra steps instead of failing)."""
+    steps: list[PlanStep] = Field(default_factory=list)
+
+
+TraceKind = Literal["precompute", "plan", "plan_rejected", "tool", "rules", "explain", "advise", "research", "fallback", "cache_hit"]
+
+
+class TraceStep(BaseModel):
+    """One step of a run. `detail` holds flags, codes and counts only: never prompt text, model text or rejected arguments."""
+    model_config = ConfigDict(extra="forbid")
+    kind: TraceKind
+    name: str
+    ms: float = 0.0
+    ok: bool = True
+    detail: dict[str, Any] = Field(default_factory=dict)
+
+
+class GroundingSummary(BaseModel):
+    ok: bool
+    checked: int
+    retried: bool
+
+
+class HeadlineSummary(BaseModel):
+    text: str
+    source: Literal["model", "template"]
+    grounding: GroundingSummary
+
+
+class AdviceMove(BaseModel):
+    rank: int
+    move_code: str                           # always one of the candidate moves (checked in code)
+    title_text: str                          # placeholders already filled in
+    why_text: str
+    source: Literal["model", "template"]
+    priority: int                            # the waterfall step the move serves (0 = close the monthly gap, 8 = an opportunity)
+    addresses_current_step: bool
+
+
+class BadReply(BaseModel):
+    """One model reply that was not usable JSON: how it ended, never what it said. finish_reason "length" means it was cut off."""
+    finish_reason: str
+    completion_tokens: int
+    max_tokens: int | None
+
+
+class AdviceDiagnostics(BaseModel):
+    """How the advisor's answer fared, as counts and reason codes only (never model text)."""
+    first_try_ok: bool                       # the model's first answer passed every check
+    retried: bool
+    model_calls: int
+    template_moves: int                      # moves served from the template
+    first_reasons: list[str] = Field(default_factory=list)     # why the first answer failed: unknown_move_code, figure_not_in_facts,
+    bad_replies: list[BadReply] = Field(default_factory=list)  # one per unusable reply (llm_bad_reply)
+    final_reasons: list[str] = Field(default_factory=list)     # judgment, style, contradicts_<label>, no_placeholder, zero_figure, ...
+
+
+class Advice(BaseModel):
+    """What the customer is told to do next. The verdict and the candidates come from code; the model only picks and words them."""
+    verdict: Literal["on_track", "plan_ahead", "act_now"]      # set by code (rules.verdict)
+    current_step: int | Literal["gap"] | None
+    moves: list[AdviceMove]                  # at most 3, ranked
+    notes: list[str] = Field(default_factory=list)             # e.g. "Retirement saving comes before education saving."
+    source: Literal["model", "template", "mixed"]
+    grounding: GroundingSummary
+    diagnostics: AdviceDiagnostics
+
+
+PayoffVerdict = Literal["pay_it_off", "pay_with_tradeoff", "keep_cash", "no_room", "no_debt"]
+
+
+class PayoffAnswer(BaseModel):
+    """Up to two sentences about the chosen plan. The model writes them; the verdict is not part of them."""
+    text: str
+    source: Literal["model", "template"]
+    grounding: GroundingSummary
+    diagnostics: AdviceDiagnostics
+
+
+class PayoffAnalysis(BaseModel):
+    """The simulate_payoff event's result: the answer to "should I pay it off?" and everything the Pay Off screen draws."""
+    verdict: PayoffVerdict                   # set by code from payoff_priority's recommendation and the chosen plan's warnings
+    recommended: Recommendation | None       # payoff_priority's pick (code, reason_code)
+    strategy_code: str | None                # the plan shown: the recommended one, unless the caller chose another
+    strategy_title: str | None               # a fixed plain phrase for it
+    extra_monthly: float                     # resolved
+    lump_sum: float                          # resolved
+    safe_lump_sum: float
+    comparison: list[StrategySummary]        # strategies A-E side by side: months, interest, saved, cushion effect, warnings
+    simulation: PayoffSimulation | None      # the chosen plan in full: schedule, and the cash forecast with and without it
+    answer: PayoffAnswer
+
+
+class SourceLine(BaseModel):
+    figure: str                              # msrp, mpg_combined, nhtsa_stars, iihs_award
+    source_title: str
+    fetched_at: str
+    url: str
+
+
+class Figure(BaseModel):
+    """One cited figure, straight from the research pack. value is None when the pack has no verified figure (source then says where it was
+    looked for, if anywhere)."""
+    value: float | str | None
+    unit: str
+    model_year: int | None
+    source: SourceRef | None
+
+
+class PickFigures(BaseModel):
+    msrp: Figure
+    model_year: Figure                       # the vehicle's model year, sourced from its price page (or its fuel-economy record)
+    mpg_combined: Figure
+    nhtsa_stars: Figure
+    iihs_award: Figure
+
+
+class ResearchPick(BaseModel):
+    id: str
+    name: str
+    figures: PickFigures
+    why_text: str                            # words from the Researcher (or the code template), figures from the pack
+    source: Literal["model", "template"]
+    sources: list[SourceLine]                # the UI source line: title + date, with the url as a link
+
+
+BuyVerdict = Literal["affordable", "stretch", "not_now"]
+
+
+class BuyAnalysis(BaseModel):
+    """The simulate_buy event's result: the cars the Researcher picked, three ways to pay for the chosen one, and the answer."""
+    no_options: bool = False                 # no car in the pack fits the segment and budget: picks is empty, chosen is None
+    verdict: BuyVerdict | None               # set by code; None when there are no options
+    query: BuyQuery                          # what the Researcher was told (and all it was told)
+    picks: list[ResearchPick]
+    research_source: Literal["model", "template"]
+    chosen: str | None                       # the car the plans are for: the caller's choice, else the top pick
+    plans: BuyPlans | None
+    answer: PayoffAnswer
+
+
+class AnalysisResult(BaseModel):
+    run_id: str
+    event: str
+    feature: str
+    customer_id: str
+    as_of: str
+    prompt_version: str
+    data_version: str
+    inputs: dict[str, Any]
+    compute: dict[str, Any]                  # formula results by name (plain JSON)
+    facts: dict[str, Any]                    # the fact sheet the explanation used
+    status: str | None                       # overall_status, decided in code
+    summary: HeadlineSummary | None
+    research: list[Any] = Field(default_factory=list)       # empty in v1
+    advice: Advice | None = None
+    payoff: PayoffAnalysis | None = None                     # the simulate_payoff event
+    buy: BuyAnalysis | None = None                           # the simulate_buy event
+    trace: list[TraceStep]
+    llm_trace: list[dict[str, Any]]          # the LLM client's per-run trace
+    degraded: bool = False                   # a fallback was used somewhere
+
+    def with_trace(self, step: TraceStep) -> "AnalysisResult":
+        return self.model_copy(update={"trace": [*self.trace, step]})

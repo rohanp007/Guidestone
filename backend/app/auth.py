@@ -19,7 +19,7 @@ import jwt
 import pandas as pd
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
 from . import config
@@ -156,7 +156,7 @@ def _cookie_args() -> dict:
 
 
 @router.post("/auth/login", response_model=LoginResponse)
-def login(body: LoginRequest, request: Request, response: Response) -> LoginResponse:
+def login(body: LoginRequest, request: Request, response: Response, background: BackgroundTasks) -> LoginResponse:
     ip = request.client.host if request.client else "unknown"
     email = body.email.strip().lower()
     if _blocked(ip, email):
@@ -171,6 +171,9 @@ def login(body: LoginRequest, request: Request, response: Response) -> LoginResp
         raise HTTPException(status_code=401, detail=BAD_LOGIN)
     token, max_age = _issue(user.customer_id)
     response.set_cookie(value=token, max_age=max_age, **_cookie_args())
+    if (profile := load_profiles().get(user.customer_id)) is not None:
+        from .agent import orchestrator                  # imported here: the agent package depends on the API layer, which imports this module
+        background.add_task(orchestrator.warm, profile)  # starts the dashboard check-up now; the response does not wait for it
     return LoginResponse(customer_id=user.customer_id, first_name=user.first_name)
 
 
