@@ -28,7 +28,7 @@ import pandas as pd
 from ..config import ASSUMPTIONS_PATH, DATA_DIR, assumptions as load_assumptions
 from ..data import derive, loader
 from ..data.models import (Assumption, Backtest, Base, ForecastChange, ForecastEvent, LiquidForecast, LowPoint, MonthEndPoint,
-                           MonthlyNet, PercentileBands, Profile, Recurring, Shortfall)
+                           MonthEndProbability, MonthlyNet, PercentileBands, Profile, Recurring, Shortfall)
 from pydantic import Field
 
 from .registry import register
@@ -40,7 +40,8 @@ BOOTSTRAP_BLOCKS = (2, 3)        # variable spend is resampled in runs of 2-3 co
 MAPE_FLOOR_SHARE = 0.10          # percentage errors are relative to max(|actual|, this share of monthly take-home): balances sit near zero
 CACHE_PATH = DATA_DIR / ".cache" / "backtest.pkl"
 # Model switches, so each source of variance can be measured on its own (scripts/measure_coverage.py). All on in production.
-OPTIONS = {"total_spend": True, "uncertainty": True, "recurring_noise": True, "seasonal_uncertainty": True, "sweeps": True, "calibrate": True}
+OPTIONS = {"total_spend": True, "uncertainty": True, "recurring_noise": True, "seasonal_uncertainty": True, "sweeps": True, "calibrate": True,
+           "utility_seasonality": True}
 DRIFT_REL_ANNUAL_SD = 0.006      # random-walk drift in the spending level, sd per year, relative. Measured: block-mean changes of the 100
                                  # customers' spending match independent monthly noise at 3-6 months and exceed it only slightly at 12 (~0.6%/yr)
 CARD_MIN_PAYMENT, CARD_MIN_SHARE = 35.0, 0.02
@@ -101,6 +102,13 @@ class Schedule:
         return v
 
 
+def _by_month(dates: list[date]) -> dict[tuple[int, int], list[date]]:
+    out: dict[tuple[int, int], list[date]] = {}
+    for d in sorted(dates):
+        out.setdefault((d.year, d.month), []).append(d)
+    return out
+
+
 def _anniversaries(d: date, as_of: date) -> int:
     return (d.year - as_of.year) - ((d.month, d.day) < (as_of.month, as_of.day))
 
@@ -158,27 +166,40 @@ def build_schedule(profile: Profile, horizon_months: int, A: dict[str, float], c
         if is_income: income_monthly += r.monthly_amount
         if is_rent: rent_monthly += -r.monthly_amount
 
-        for d in dates:
+        def amount_on(d: date) -> float:
             n = _anniversaries(d, as_of)
-            factor = ((1 + growth) ** n if is_income else (1 + bump) ** n if is_rent
-                      else (1 + infl) ** (months_since(d) / 12) if kind in ("bill", "card_payment") else 1.0)
-            sch.cash.append([d, kind, per_event * factor, r.description, r.residuals or None])
+            season = r.month_factors[d.month - 1] if r.month_factors and OPTIONS["utility_seasonality"] else 1.0
+            return per_event * season * ((1 + growth) ** n if is_income else (1 + bump) ** n if is_rent
+                                         else (1 + infl) ** (months_since(d) / 12) if kind in ("bill", "card_payment") else 1.0)
+
+        for ds in _by_month(dates).values():
+            if is_income and r.cadence == "biweekly" and len(ds) == 3:
+                amt = amount_on(ds[2])
+                sch.events.append(ForecastEvent(day=ds[2], kind="extra_paycheck", monthly_impact=amt,
+                                                description=f"{ds[2]:%B} has a third paycheck (${amt:,.0f})"))
+            elif not is_income and r.cadence == "monthly" and kind in ("bill", "debt_payment") and len(ds) == 2:
+                amt = amount_on(ds[1])
+                sch.events.append(ForecastEvent(day=ds[1], kind="double_payment", monthly_impact=amt,
+                                                description=f"{r.description} lands twice in {ds[1]:%B} ({ds[0]:%b} {ds[0].day} and {ds[1]:%b} {ds[1].day}); extra payment ${abs(amt):,.0f}"))
+
+        for d in dates:
+            sch.cash.append([d, kind, amount_on(d), r.description, r.residuals or None])
 
     for n in range(1, horizon_months // 12 + 1):
         d = add_months(as_of, 12 * n)
         if d > end: break
         if income_monthly:
             sch.events.append(ForecastEvent(day=d, kind="raise", description=f"Annual {'COLA' if profile.employment == 'retired' else 'raise'} of {growth:.1%}",
-                                            monthly_impact=income_monthly * (1 + growth) ** (n - 1) * growth))
+                                            monthly_impact=income_monthly * (1 + growth) ** (n - 1) * growth, assumed_timing=True))
         if rent_monthly:
             sch.events.append(ForecastEvent(day=d, kind="rent_renewal", description=f"Rent renewal, +{bump:.1%}",
-                                            monthly_impact=-rent_monthly * (1 + bump) ** (n - 1) * bump))
+                                            monthly_impact=-rent_monthly * (1 + bump) ** (n - 1) * bump, assumed_timing=True))
 
     for a in profile.accounts_of("cd"):                       # auto-renews and stays outside liquid cash: a marker, no cash
         m = a.maturity_date
         while m and a.term_months and m <= end:
             if m > as_of:
-                sch.events.append(ForecastEvent(day=m, kind="cd_matures", description=f"CD matures and auto-renews at the market rate", monthly_impact=None))
+                sch.events.append(ForecastEvent(day=m, kind="cd_matures", description="CD matures and auto-renews", monthly_impact=None))
             m = add_months(m, a.term_months)
 
     for c in changes or []:
@@ -255,7 +276,7 @@ def _card(profile: Profile) -> Card | None:
 class Sim:
     schedule: Schedule
     pct: np.ndarray                      # (3, days + 1): p10, p50, p90 of liquid cash per day
-    risks: dict[str, tuple[float, float, float]]   # name -> (buffer, P(ever below), P(below within 90 days))
+    risks: dict[str, tuple[float, float, float, list[float]]]   # name -> (buffer, P(ever below), P(below within 90 days), P(below) at each month-end)
     net_per_month: np.ndarray            # (paths,)
     month1_variable: float
     month1_card: float | None            # median card payment in month 1, when the card is simulated
@@ -265,10 +286,14 @@ class Sim:
 
 
 def _simulate(profile: Profile, horizon_months: int, paths: int, cushion: float, seed: int, A: dict[str, float],
-              changes: list[ForecastChange] | None, risk_factors: list[float] | None = None) -> Sim:
+              changes: list[ForecastChange] | None, risk_factors: list[float] | None = None,
+              income_scale: np.ndarray | None = None) -> Sim:
     """`risk_factors` are the calibration's month-end band factors. When given, the risk probabilities are computed on paths whose
     deviation from the median path is scaled by the factor interpolated for that day; the returned percentiles stay RAW (the
-    calibration is fit on them, and _summarize scales the bands itself)."""
+    calibration is fit on them, and _summarize scales the bands itself).
+
+    `income_scale` is (paths, months): each path's paychecks are multiplied by its value for that month (the job-loss stress test).
+    Everything else, including every random draw, is identical to the run without it, so the two runs are a paired comparison."""
     if profile.spending is None:
         raise ValueError(f"{profile.id}: needs derive.enrich() first")
     sp = profile.spending
@@ -311,6 +336,13 @@ def _simulate(profile: Profile, horizon_months: int, paths: int, cushion: float,
     card_daily = card.share * daily if card else None
     net = sch.vector()[1:][None, :] - (daily - card_daily if card else daily)
 
+    if income_scale is not None:
+        pay = np.zeros(D)
+        for e in sch.cash:
+            if e[1] == "income":
+                pay[(e[0] - sch.as_of).days - 1] += e[2]
+        net += (income_scale[:, month_of_day] - 1.0) * pay[None, :]
+
     if OPTIONS["recurring_noise"]:                                    # bills whose amount really varies: bootstrap their own residuals
         for d, _, amount, _, resid in sch.cash:
             if resid is not None and len(resid) == len(samples):
@@ -335,6 +367,13 @@ def _simulate(profile: Profile, horizon_months: int, paths: int, cushion: float,
             pays.append(pay)
         in_month1 = [p for p, d in zip(pays, sch.card_dates) if d <= sch.month_ends[0]]
         month1_card = float(np.median(sum(in_month1))) if in_month1 else 0.0
+        by_date = dict(zip(sch.card_dates, pays))
+        for ds in _by_month(sch.card_dates).values():              # a payment that slid across the month boundary lands twice
+            if len(ds) == 2:
+                amt = -float(np.median(by_date[ds[1]]))
+                sch.events.append(ForecastEvent(day=ds[1], kind="double_payment", monthly_impact=amt,
+                                                description=f"Card payments land twice in {ds[1]:%B} ({ds[0]:%b} {ds[0].day} and {ds[1]:%b} {ds[1].day}); extra payment ${abs(amt):,.0f}"))
+        sch.events.sort(key=lambda e: (e.day, e.kind))
 
     balance = np.empty((paths, D + 1))
     balance[:, 0] = start
@@ -362,15 +401,22 @@ def _simulate(profile: Profile, horizon_months: int, paths: int, cushion: float,
     if risk_factors is not None:
         scored = pct[1] + (balance - pct[1]) * band_factors(risk_factors, D)[None, :]
     risks = {}
+    me_days = [(me - sch.as_of).days for me in sch.month_ends]
     for name, buffer in (("overdraft", 0.0), ("cushion", cushion)):
         below = scored < buffer
-        risks[name] = (buffer, float(below.any(axis=1).mean()), float(below[:, :DAILY_DAYS + 1].any(axis=1).mean()))
+        risks[name] = (buffer, float(below.any(axis=1).mean()), float(below[:, :DAILY_DAYS + 1].any(axis=1).mean()),
+                         [float(below[:, i].mean()) for i in me_days])
     checking_share = 1 - card.share if card else 1.0
     return Sim(sch, pct, risks, (balance[:, -1] - start) / M,
                float(np.median(monthly[:, 0])) * checking_share, month1_card, interest1, start, paths)
 
 
 # ------------------------------------------------------------------ 4. summarize
+def _last_below(curve: np.ndarray, buffer: float, as_of: date) -> date | None:
+    hit = np.flatnonzero(curve < buffer)
+    return as_of + timedelta(days=int(hit[-1])) if hit.size else None
+
+
 def _first_below(curve: np.ndarray, buffer: float, as_of: date) -> date | None:
     hit = curve < buffer
     return as_of + timedelta(days=int(hit.argmax())) if hit.any() else None
@@ -393,7 +439,11 @@ def _summarize(profile: Profile, sim: Sim, horizon_months: int, A_all: dict[str,
     day = lambda i: sch.as_of + timedelta(days=int(i))
     risk = lambda name: Shortfall(buffer=sim.risks[name][0], probability=sim.risks[name][1], probability_90d=sim.risks[name][2],
                                   first_date_p50=_first_below(p50, sim.risks[name][0], sch.as_of),
-                                  first_date_p10=_first_below(p10d, sim.risks[name][0], sch.as_of))
+                                  first_date_p10=_first_below(p10d, sim.risks[name][0], sch.as_of),
+                                  share_of_days_below=float((p50[1:] < sim.risks[name][0]).mean()),
+                                  last_date_below_p50=_last_below(p50, sim.risks[name][0], sch.as_of),
+                                  month_end_probability_by_month=[MonthEndProbability(month=me.strftime("%Y-%m"), probability=pr)
+                                                                  for me, pr in zip(sch.month_ends, sim.risks[name][3])])
     low = int(p50.argmin())
     me_idx = [(me - sch.as_of).days for me in sch.month_ends]
 

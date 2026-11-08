@@ -89,6 +89,8 @@ class Recurring(Base):
     months_seen: int = Field(ge=1, le=24)
     last_date: date                        # most recent occurrence in the history
     account_id: str
+    month_factors: list[float] = Field(default_factory=list)   # utilities only: 12 multipliers Jan..Dec (heating / cooling), average 1.0; empty = none.
+                                                               # `residuals` below are what is left after dividing these out
     residuals: list[float] = Field(default_factory=list)   # month-by-month deviation from this flow's own mean (0.08 = 8% above), aligned with
                                                            # the history months; only for bills whose amount actually varies (utilities, ...)
 
@@ -100,6 +102,7 @@ class MonthPoint(Base):
     total_assets: float
     total_debt: float
     net_worth: float
+    estimated_assets: float = 0.0          # home + vehicle estimates included in total_assets (no statements behind them)
     income: float                          # flow_class == income
     expenses: float                        # flow_class == expense
 
@@ -214,6 +217,7 @@ class Profile(Base):
     # money
     accounts: list[Account]
     recurring: list[Recurring] = Field(default_factory=list)
+    ended_recurring: list[Recurring] = Field(default_factory=list)   # flows that stopped before as_of (paid-off loan, cancelled sub); display only, never forecast
     variable_spend: dict[str, float] = Field(default_factory=dict)  # category -> avg monthly $ (non-recurring), checking + card
     variable_spend_checking: dict[str, float] = Field(default_factory=dict)  # same, but only what leaves checking (card spend reaches
                                                                               # checking via the recurring card payment)
@@ -265,15 +269,23 @@ class Shortfall(Base):
     probability_90d: float                 # ...within the first 90 days
     first_date_p50: date | None            # first day the median path is below buffer
     first_date_p10: date | None            # first day the bad-luck (p10) path is below buffer
+    share_of_days_below: float             # share of horizon days on which the median (p50) path is below buffer
+    last_date_below_p50: date | None       # last day the median path is below buffer (None if never)
+    month_end_probability_by_month: list["MonthEndProbability"]   # P(balance < buffer) at each month-end, on calibrated paths
+
+
+class MonthEndProbability(Base):
+    month: str                             # "YYYY-MM"
+    probability: float
 
 
 class MonthlyNet(Base):
-    mean: float                            # each path's average monthly change in liquid cash
+    mean: float                            # each path's average monthly change in liquid cash. UNCALIBRATED: averaging over the horizon shrinks the spread
     p10: float
     p90: float
 
 
-ForecastEventKind = Literal["raise", "rent_renewal", "loan_ends", "cd_matures", "lump_sum", "income_change"]
+ForecastEventKind = Literal["raise", "rent_renewal", "loan_ends", "cd_matures", "lump_sum", "income_change", "extra_paycheck", "double_payment"]
 
 
 class ForecastEvent(Base):
@@ -281,6 +293,7 @@ class ForecastEvent(Base):
     kind: ForecastEventKind
     description: str
     monthly_impact: float | None = None    # signed $/mo effect on cash flow; None when there is no cash effect (cd_matures)
+    assumed_timing: bool = False           # True when the date is an assumption, not known (raises and rent renewals sit on the as-of anniversary)
 
 
 class Assumption(Base):

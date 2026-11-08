@@ -8,8 +8,9 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import ValidationError
 
 from ..data.models import Profile
-from ..formulas import forecast, health  # noqa: F401  (importing registers the formulas)
+from ..formulas import forecast, health, stress  # noqa: F401  (importing registers the formulas)
 from ..formulas.registry import FORMULAS
+from ..auth import current_user
 from .deps import get_profile
 from .schemas import FormulaInfo
 from .serialize import SafeJSONResponse, to_plain
@@ -21,7 +22,7 @@ router = APIRouter(prefix="/api", tags=["formulas"])
 _CACHE: dict[tuple[str, str, str], dict] = {}
 
 
-@router.get("/formulas", response_model=list[FormulaInfo])
+@router.get("/formulas", response_model=list[FormulaInfo], dependencies=[Depends(current_user)])
 def list_formulas() -> list[FormulaInfo]:
     """Every registered formula. `args_schema` is the Pydantic JSON schema of its arguments: the debug page builds forms from it
     and the agents will see it as the tool schema."""

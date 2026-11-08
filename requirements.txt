@@ -11,3 +11,8 @@ pandas
 # tests
 pytest
 httpx
+
+# auth
+argon2-cffi
+PyJWT
+python-dotenv

@@ -14,6 +14,8 @@ Run:  .venv/bin/python3 scripts/fit_calibration.py          (from the repo root)
 """
 import json, os, sys
 
+import numpy as np
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "backend"))
 
@@ -39,12 +41,23 @@ def main():
     fmt = lambda fs: ", ".join(f"{h}d x{f:.2f}" for h, f in zip(fc.CAL_ANCHORS, fs))
     print(f"factors on all customers (in-sample: month-end {in_me:.2f}, every day {in_days:.2f}):\n   monthly chart (month-end days): {fmt(month_end)}\n   daily chart (every day):        {fmt(daily)}")
 
+    # Error as a share of one month's outflow, each customer's stricter of (mean daily error, cumulative-net-change error),
+    # then the typical customer and the tail. Same customers as the fit. Quoted in docs/forecast.md.
+    kept_ids = [cid for cid, c in curves.items() if c is not None and c.known_one_off is None]
+    bts = [fc.backtest_for(profiles[cid]) for cid in kept_ids]
+    backtest_error = {}
+    for h in fc.CAL_ANCHORS:
+        strict = [max(getattr(b, f"outflow_err_{h}d"), getattr(b, f"net_change_err_{h}d")) for b in bts
+                  if b is not None and getattr(b, f"outflow_err_{h}d") is not None and getattr(b, f"net_change_err_{h}d") is not None]
+        backtest_error[f"{h}d"] = dict(median=float(np.median(strict)), p75=float(np.percentile(strict, 75)), p90=float(np.percentile(strict, 90)), customers=len(strict))
+    print("backtest error (stricter, share of a month's outflow): " + " | ".join(f"{k} median {v['median']:.1%} p75 {v['p75']:.1%} p90 {v['p90']:.1%}" for k, v in backtest_error.items()))
+
     note = (f"p10-p90 bands scaled using backtest errors across {len(kept)} customers (monthly chart x{month_end[0]:.1f} / x{month_end[1]:.1f} / x{month_end[2]:.1f} "
             f"at 30 / 90 / 180 days); on held-out customers the monthly band contained the actual outcome {held['held_out_month_end']:.0%} of the time "
             f"(was {held['uncalibrated_month_end']:.0%}), and the daily band {held['held_out_all_days']:.0%} of days (was {held['uncalibrated_all_days']:.0%})")
     with open(fc.CALIBRATION_PATH, "w") as f:
         json.dump(dict(nominal=fc.CAL_NOMINAL, anchors_days=list(fc.CAL_ANCHORS), daily_factors=daily, month_end_factors=month_end, customers=len(kept), left_out=left_out,
-                       held_out=held, options=fc.OPTIONS, note=note), f, indent=2)
+                       held_out=held, backtest_error=backtest_error, options=fc.OPTIONS, note=note), f, indent=2)
         f.write("\n")
     print(f"\nwrote {os.path.relpath(fc.CALIBRATION_PATH, ROOT)}")
 

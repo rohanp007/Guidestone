@@ -1,0 +1,85 @@
+@import "tailwindcss";
+
+:root {
+  color-scheme: light;
+  --bg: #f7f5f0;
+  --surface: #ffffff;
+  --line: #e6e1d8;
+  --line-strong: #d3ccbf;
+  --ink: #0e1b2c;
+  --ink-2: #4a5566;
+  --ink-3: #8a93a0;
+  --navy: #0b2d52;
+  --navy-tint: #e8eef5;
+  --orange: #e8702a;
+  --orange-tint: #fcebdf;
+  --good: #2f7d5b;
+  --fair: #b7791f;
+  --poor: #b4423a;
+  --radius: 6px;
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-navy: var(--navy);
+  --color-navy-tint: var(--navy-tint);
+  --color-orange: var(--orange);
+  --color-orange-tint: var(--orange-tint);
+  --color-good: var(--good);
+  --font-sans: var(--font-plex-sans), system-ui, sans-serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, monospace;
+}
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 16px;
+  line-height: 1.5;
+  font-variant-numeric: tabular-nums;
+}
+
+.label {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+/* motion: transform and opacity only, one curve */
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes rise-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes pop-in { from { opacity: 0; transform: scale(0.97); } to { opacity: 1; transform: none; } }
+.fade-in { animation: fade-in 250ms var(--ease) both; }
+.rise-in { animation: rise-in 250ms var(--ease) both; }
+.pop-in { animation: pop-in 150ms var(--ease) both; }
+.press { transition: transform 150ms var(--ease), background-color 150ms var(--ease), border-color 150ms var(--ease), color 150ms var(--ease); }
+.press:active { transform: scale(0.97); }
+
+@media (hover: hover) and (pointer: fine) {
+  .row-hover { transition: background-color 150ms var(--ease); }
+  .row-hover:hover { background-color: color-mix(in srgb, var(--navy-tint) 55%, transparent); }
+}
+
+:focus-visible { outline: 2px solid var(--navy); outline-offset: 2px; border-radius: var(--radius); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-delay: 0ms !important; transition-duration: 0.01ms !important; }
+}
+
+/* transactions: a real table on desktop, stacked rows on a phone */
+@media (max-width: 640px) {
+  table.stack thead { position: absolute; left: -9999px; }
+  table.stack, table.stack tbody, table.stack tr, table.stack td { display: block; width: 100%; }
+  table.stack tr { padding: 12px 0; border-bottom: 1px solid var(--line); }
+  table.stack td { padding: 0 !important; border: 0 !important; text-align: left !important; }
+  table.stack td.amt { font-size: 16px; font-weight: 500; }
+}

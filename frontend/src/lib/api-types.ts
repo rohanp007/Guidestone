@@ -4,6 +4,77 @@
  */
 
 export interface paths {
+    "/api/auth/login": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Login */
+        post: operations["login_api_auth_login_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/logout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Logout */
+        post: operations["logout_api_auth_logout_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Me */
+        get: operations["me_api_me_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/demo-personas": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Demo Personas
+         * @description The featured customers, for the demo login buttons. Only exists in demo mode, and never includes a password.
+         */
+        get: operations["demo_personas_api_auth_demo_personas_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/health": {
         parameters: {
             query?: never;
@@ -50,7 +121,8 @@ export interface paths {
         };
         /**
          * List Profiles
-         * @description Feeds the persona switcher. Featured personas come first (in the order configured), then everyone by id.
+         * @description Every customer's summary, for the demo's persona list. Featured personas come first, then everyone by id.
+         *     Demo mode only: in production no one can list other customers.
          */
         get: operations["list_profiles_api_profiles_get"];
         put?: never;
@@ -212,6 +284,17 @@ export interface components {
             /** Share */
             share: number;
         };
+        /** DemoPersona */
+        DemoPersona: {
+            /** Customer Id */
+            customer_id: string;
+            /** Email */
+            email: string;
+            /** First Name */
+            first_name: string;
+            /** Last Name */
+            last_name: string;
+        };
         /** Dependent */
         Dependent: {
             /** Age */
@@ -261,6 +344,36 @@ export interface components {
             /** Market Value */
             market_value: number;
         };
+        /** LoginRequest */
+        LoginRequest: {
+            /** Email */
+            email: string;
+            /** Password */
+            password: string;
+        };
+        /** LoginResponse */
+        LoginResponse: {
+            /** Customer Id */
+            customer_id: string;
+            /** First Name */
+            first_name: string;
+        };
+        /** Me */
+        Me: {
+            /** Customer Id */
+            customer_id: string;
+            /** Email */
+            email: string;
+            /** First Name */
+            first_name: string;
+            /** Last Name */
+            last_name: string;
+            /** Demo Mode */
+            demo_mode: boolean;
+            /** As Of Date */
+            as_of_date: string;
+            summary: components["schemas"]["Summary"] | null;
+        };
         /**
          * MonthPoint
          * @description One month of history, from monthly_statements.
@@ -276,6 +389,11 @@ export interface components {
             total_debt: number;
             /** Net Worth */
             net_worth: number;
+            /**
+             * Estimated Assets
+             * @default 0
+             */
+            estimated_assets?: number;
             /** Income */
             income: number;
             /** Expenses */
@@ -342,6 +460,8 @@ export interface components {
             accounts: components["schemas"]["Account"][];
             /** Recurring */
             recurring?: components["schemas"]["Recurring"][];
+            /** Ended Recurring */
+            ended_recurring?: components["schemas"]["Recurring"][];
             /** Variable Spend */
             variable_spend?: {
                 [key: string]: number;
@@ -415,6 +535,8 @@ export interface components {
             last_date: string;
             /** Account Id */
             account_id: string;
+            /** Month Factors */
+            month_factors?: number[];
             /** Residuals */
             residuals?: number[];
         };
@@ -745,7 +867,7 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "raise" | "rent_renewal" | "loan_ends" | "cd_matures" | "lump_sum" | "income_change";
+            kind: "raise" | "rent_renewal" | "loan_ends" | "cd_matures" | "lump_sum" | "income_change" | "extra_paycheck" | "double_payment";
             /** Description */
             description: string;
             /**
@@ -753,6 +875,11 @@ export interface components {
              * @default null
              */
             monthly_impact?: number | null;
+            /**
+             * Assumed Timing
+             * @default false
+             */
+            assumed_timing?: boolean;
         };
         /** LowPoint */
         LowPoint: {
@@ -781,6 +908,13 @@ export interface components {
             p50: number;
             /** P90 */
             p90: number;
+        };
+        /** MonthEndProbability */
+        MonthEndProbability: {
+            /** Month */
+            month: string;
+            /** Probability */
+            probability: number;
         };
         /** MonthlyNet */
         MonthlyNet: {
@@ -812,6 +946,12 @@ export interface components {
             first_date_p50: string | null;
             /** First Date P10 */
             first_date_p10: string | null;
+            /** Share Of Days Below */
+            share_of_days_below: number;
+            /** Last Date Below P50 */
+            last_date_below_p50: string | null;
+            /** Month End Probability By Month */
+            month_end_probability_by_month: components["schemas"]["MonthEndProbability"][];
         };
         /** LiquidForecast */
         LiquidForecast: {
@@ -864,6 +1004,111 @@ export interface components {
             /** Reasons */
             reasons: string[];
         };
+        /** JobLossArgs */
+        JobLossArgs: {
+            /**
+             * Horizon Months
+             * @description Months to simulate
+             * @default 24
+             */
+            horizon_months?: number;
+            /**
+             * Paths
+             * @description Monte Carlo paths; default from assumptions.json
+             * @default null
+             */
+            paths?: number | null;
+            /**
+             * Seed
+             * @description Changes the random draws; the same arguments always give identical output
+             * @default 0
+             */
+            seed?: number;
+            /**
+             * Target Months
+             * @description Emergency fund target in months of essentials; default from assumptions.json
+             * @default null
+             */
+            target_months?: number | null;
+        };
+        /** EmergencyFund */
+        EmergencyFund: {
+            /** Liquid Cash */
+            liquid_cash: number;
+            /** Essential Monthly */
+            essential_monthly: number;
+            /** Months Covered */
+            months_covered: number;
+            /** Target Months */
+            target_months: number;
+            /** Target Amount */
+            target_amount: number;
+            /** Gap */
+            gap: number;
+            /** Months To Target */
+            months_to_target: number | null;
+        };
+        /** MarkovInfo */
+        MarkovInfo: {
+            /** Monthly Job Loss */
+            monthly_job_loss: number;
+            /** Monthly Reemployment */
+            monthly_reemployment: number;
+            /** Expected Spell Months */
+            expected_spell_months: number;
+            /** Ui Income Share */
+            ui_income_share: number;
+            /** Ui Months */
+            ui_months: number;
+            /** Probability Any Job Loss */
+            probability_any_job_loss: number;
+            /** Average Months Unemployed */
+            average_months_unemployed: number;
+        };
+        /** StressScenario */
+        StressScenario: {
+            /** Name */
+            name: string;
+            /** Description */
+            description: string;
+            /** Overdraft Probability */
+            overdraft_probability: number;
+            /** Cushion Probability */
+            cushion_probability: number;
+            /** First Overdraft P50 */
+            first_overdraft_p50: string | null;
+            /** First Overdraft P10 */
+            first_overdraft_p10: string | null;
+            /** Months Until Overdraft P50 */
+            months_until_overdraft_p50: number | null;
+            /** Month End P50 */
+            month_end_p50: number[];
+            /** Month End P10 */
+            month_end_p10: number[];
+        };
+        /** JobLossStress */
+        JobLossStress: {
+            /** Profile Id */
+            profile_id: string;
+            /** Applicable */
+            applicable: boolean;
+            /** Note */
+            note: string | null;
+            /** Horizon Months */
+            horizon_months: number;
+            /** Paths */
+            paths: number;
+            emergency_fund: components["schemas"]["EmergencyFund"];
+            markov: components["schemas"]["MarkovInfo"] | null;
+            /** Scenarios */
+            scenarios: components["schemas"]["StressScenario"][];
+            /** Assumptions */
+            assumptions: {
+                [key: string]: {
+                    [key: string]: unknown;
+                };
+            };
+        };
     };
     responses: never;
     parameters: never;
@@ -873,6 +1118,97 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    login_api_auth_login_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LoginRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoginResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    logout_api_auth_logout_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    me_api_me_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Me"];
+                };
+            };
+        };
+    };
+    demo_personas_api_auth_demo_personas_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DemoPersona"][];
+                };
+            };
+        };
+    };
     health_api_health_get: {
         parameters: {
             query?: never;

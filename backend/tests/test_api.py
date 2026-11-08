@@ -12,11 +12,15 @@ from app import config
 from app.data.loader import load_profiles, transactions_for
 from app.formulas.forecast import forecast_liquid_summary
 from app.main import app
+from helpers import TEST_PASSWORD, session_for
 
 
 @pytest.fixture(scope="module")
 def client():
+    """Signed in as C001 (the lifespan runs here, so the data really loads). Every profile route is the signed-in customer's own."""
     with TestClient(app) as c:
+        r = c.post("/api/auth/login", json={"email": "c001@example.com", "password": TEST_PASSWORD})
+        assert r.status_code == 200
         yield c
 
 
@@ -82,11 +86,12 @@ def test_profile_detail_matches_the_loader(client):
     assert {a["type"] for a in body["accounts"]} >= {"checking", "credit_card", "mortgage", "home"}     # estimated assets included
 
 
-def test_unknown_profile_is_404_everywhere(client):
+def test_unknown_profile_is_403_everywhere(client):
+    """Ids that are not yours (including ones that do not exist) look the same, so nothing reveals who is a customer."""
     r = client.get("/api/profiles/C999")
-    assert r.status_code == 404 and r.json() == {"detail": "profile C999 not found"}
-    assert client.get("/api/profiles/C999/transactions").status_code == 404
-    assert client.post("/api/profiles/C999/formulas/forecast_liquid", json={}).status_code == 404
+    assert r.status_code == 403 and r.json() == {"detail": "forbidden"}
+    assert client.get("/api/profiles/C999/transactions").status_code == 403
+    assert client.post("/api/profiles/C999/formulas/forecast_liquid", json={}).status_code == 403
 
 
 # ------------------------------------------------------------------ transactions
@@ -209,8 +214,9 @@ def test_unimplemented_and_invalid_changes_are_reported_cleanly(client):
 
 
 @pytest.mark.parametrize("pid", ["C001", "C002", "C003", "C004", "C005"])
-def test_every_formula_and_profile_survives_a_strict_json_round_trip(client, pid):
+def test_every_formula_and_profile_survives_a_strict_json_round_trip(pid):
     """Catches numpy / pandas / NaN serialization bugs: every response must parse as strict JSON."""
+    client = session_for(pid)
     assert strict(client.get(f"/api/profiles/{pid}"))["id"] == pid
     for f in client.get("/api/formulas").json():
         r = client.post(f"/api/profiles/{pid}/formulas/{f['name']}", json={})
@@ -223,3 +229,22 @@ def test_every_formula_and_profile_survives_a_strict_json_round_trip(client, pid
             if isinstance(x, dict): stack += x.values()
             elif isinstance(x, list): stack += x
             else: assert x is None or isinstance(x, (str, bool, int)) or (isinstance(x, float) and math.isfinite(x))
+
+
+# ------------------------------------------------------------------ job-loss stress test
+def test_job_loss_stress_c002():
+    client = session_for("C002")
+    body = strict(client.post("/api/profiles/C002/formulas/job_loss_stress", json={}))
+    assert body["applicable"] and body["emergency_fund"]["months_covered"] < 3 and body["emergency_fund"]["gap"] > 0
+    base, markov, lost = body["scenarios"]
+    assert [base["name"], markov["name"], lost["name"]] == ["baseline", "markov", "lost_job_now"]
+    assert base["overdraft_probability"] == 0 and lost["overdraft_probability"] == 1
+    assert base["overdraft_probability"] <= markov["overdraft_probability"] <= lost["overdraft_probability"]
+    assert lost["first_overdraft_p50"] is not None and lost["months_until_overdraft_p50"] < 6
+
+
+def test_job_loss_stress_is_not_applicable_to_retirees():
+    retired = next(p for p in load_profiles().values() if p.employment == "retired")
+    client = session_for(retired.id)
+    body = strict(client.post(f"/api/profiles/{retired.id}/formulas/job_loss_stress", json={}))
+    assert body["applicable"] is False and body["scenarios"] == [] and body["emergency_fund"]["essential_monthly"] > 0

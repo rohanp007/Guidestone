@@ -23,5 +23,35 @@
     "value": 1000,
     "source": "Design choice: Monte Carlo paths per forecast; a 24-month run takes well under 100ms at this size.",
     "as_of": "2026-11-07"
+  },
+  "job_loss_monthly": {
+    "value": 0.0089,
+    "source": "BLS CPS labor force status flows, employed to unemployed, seasonally adjusted: monthly flow divided by beginning-of-month employment. Average of Jun-Jul, Jul-Aug, Aug-Sep and Sep-Oct 2026 (0.78%, 0.93%, 0.89%, 0.96%), computed from the counts at https://www.bls.gov/web/empsit/cps_flows_recent.htm (modified 2026-11-06). Includes people who quit into unemployment, so it slightly overstates involuntary job loss.",
+    "as_of": "2026-10-31"
+  },
+  "reemployment_monthly": {
+    "value": 0.16,
+    "source": "Chosen so the expected spell matches BLS mean duration of unemployment, 27.1 weeks (about 6.2 months), Oct 2026, Table A-12: https://www.bls.gov/news.release/empsit.t12.htm (1 / 6.2 = 0.16). The raw CPS unemployed-to-employed flow is higher (about 25% a month, 23.6-26.4% over Jun-Oct 2026) but averages over a mix of short and long spells, which understates a long job loss; the median spell is 11.9 weeks. A memoryless chain cannot match both, and a stress test should not be optimistic.",
+    "as_of": "2026-10-31"
+  },
+  "ui_replacement": {
+    "value": 0.5,
+    "source": "Pennsylvania L&I: 'Your Weekly Benefit Rate should equal about one-half of your full-time weekly wage': https://www.pa.gov/en/agencies/dli/resources/for-claimants-workers/benefits-information/benefit-guide . Applied to gross pay and treated as take-home (benefits are taxable; withholding is optional).",
+    "as_of": "2026-11-07"
+  },
+  "ui_weekly_cap": {
+    "value": 604,
+    "source": "Highest rate in the Pennsylvania L&I 'Rate and Amount' chart ($604/week): https://www.pa.gov/en/agencies/dli/resources/for-claimants-workers/benefits-information/benefit-guide/eligibility-information . The chart is undated, so the 2026 maximum is UNCONFIRMED (some secondary sources say $605). Check before publishing.",
+    "as_of": "2026-11-07"
+  },
+  "ui_max_months": {
+    "value": 6,
+    "source": "Pennsylvania regular UC pays up to 26 times the weekly rate (18-26 weeks depending on credit weeks), about 6 months: https://www.pa.gov/en/agencies/dli/resources/for-claimants-workers/benefits-information/benefit-guide . Assumes the full 26 weeks.",
+    "as_of": "2026-11-07"
+  },
+  "emergency_fund_months": {
+    "value": 3,
+    "source": "Design choice: 3 months of essential expenses is the common minimum rule of thumb; the formula takes the target as an argument (6 is typical for one-earner or variable-income households).",
+    "as_of": "2026-11-07"
   }
 }

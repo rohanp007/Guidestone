@@ -14,6 +14,14 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 
+def _round(x: float) -> float:
+    """Cents for anything at money scale (|x| >= 10); 4 significant digits below that, so probabilities, ratios and factors
+    (0.0150, 1.155, 2.074) keep their precision. Keeps responses small without flattening small rates to zero."""
+    if abs(x) >= 10:
+        return round(x, 2)
+    return float(f"{x:.4g}")
+
+
 def to_plain(obj: Any) -> Any:
     """Plain Python: dict / list / str / int / float / bool / None. NaN, NaT and +-inf become None; dates become ISO strings."""
     if obj is None or isinstance(obj, (bool, str)):
@@ -26,7 +34,7 @@ def to_plain(obj: Any) -> Any:
         return int(obj)
     if isinstance(obj, (np.floating, float, Decimal)):
         x = float(obj)
-        return x if math.isfinite(x) else None
+        return _round(x) if math.isfinite(x) else None
     if obj is pd.NaT or obj is pd.NA:
         return None
     if isinstance(obj, (pd.Timestamp, datetime, date)):

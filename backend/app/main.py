@@ -9,6 +9,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
 
+from . import auth, config
 from .api import formulas, meta, profiles
 from .api.serialize import SafeJSONResponse
 from .data import loader
@@ -23,15 +24,21 @@ ORIGINS = ["http://localhost:3000"] + ([os.environ["FRONTEND_ORIGIN"]] if os.env
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Load everything before the first request, so a data problem crashes on boot instead of mid-demo."""
+    config.auth_settings()               # fails now, not on the first sign-in, if the secrets are missing
+    auth._users()
     loader.load_profiles()
     loader._tables()                     # transactions and statements, for the transactions endpoint
     profiles.paycheck_flags()
     yield
 
 
-app = FastAPI(title="Guidestone", lifespan=lifespan, default_response_class=SafeJSONResponse)
-app.add_middleware(CORSMiddleware, allow_origins=ORIGINS, allow_methods=["GET", "POST"], allow_headers=["*"], expose_headers=["X-Compute-Ms", "X-Cache"])
-for module in (meta, profiles, formulas):
+_demo = config.auth_settings().demo_mode      # the interactive docs and the schema are only served in demo mode
+app = FastAPI(title="Guidestone", lifespan=lifespan, default_response_class=SafeJSONResponse,
+              docs_url="/docs" if _demo else None, redoc_url=None, openapi_url="/openapi.json" if _demo else None)
+# cookies need an explicit origin list: browsers refuse credentialed requests to "Access-Control-Allow-Origin: *"
+app.add_middleware(CORSMiddleware, allow_origins=ORIGINS, allow_credentials=True, allow_methods=["GET", "POST"],
+                   allow_headers=["Content-Type"], expose_headers=["X-Compute-Ms", "X-Cache"])
+for module in (auth, meta, profiles, formulas):
     app.include_router(module.router)
 
 
