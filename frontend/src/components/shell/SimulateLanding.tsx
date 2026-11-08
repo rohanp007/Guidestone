@@ -19,11 +19,11 @@ export default function SimulateLanding() {
               </Link>
             </li>
             <li>
-              <div aria-disabled="true" className="rounded-[6px] border border-line bg-surface p-5 text-ink-2">
+              <Link href="/simulate/buy" className="press row-hover block rounded-[6px] border border-line-strong bg-surface p-5">
                 <span className="text-[18px] font-medium">Buy</span>
-                <span className="ml-2 rounded-[6px] border border-line-strong px-1.5 py-px text-[11px] uppercase tracking-wide">soon</span>
-                <span className="mt-1 block text-[15px]">Check what a car, a home or a big purchase would do to your cash and your debt.</span>
-              </div>
+                <span className="mt-1 block text-[15px] text-ink-2">Find cars that fit your budget, then see whether to pay cash, finance, or a mix, and what it does to your cash.</span>
+                <span className="mt-3 block text-[14px] font-medium text-navy">Start →</span>
+              </Link>
             </li>
           </ul>
         </div>
