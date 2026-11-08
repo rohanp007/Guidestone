@@ -331,6 +331,10 @@ async def _pipeline_payoff(st: _State) -> None:
 
 # ---- the buy event -------------------------------------------------------------------------------------------------------------
 
+class ChoiceNotInPicks(ValueError):
+    """choice_id names a car the Researcher did not offer for this query: the caller's mistake (422), not a server error."""
+
+
 async def _pipeline_buy(st: _State) -> None:
     """Researcher (sanitized query only) -> buy_plans for the chosen car -> the advisor's answer. No eligible car: a clear error."""
     st.llm_trace = client.start_run()
@@ -340,11 +344,17 @@ async def _pipeline_buy(st: _State) -> None:
     found = await researcher.research(query)
     st.trace.append(TraceStep(kind="research", name="researcher", ms=round((time.perf_counter() - t0) * 1000, 1),
                               detail={"source": found.source, "retried": found.retried, "picks": len(found.picks), "reasons": ",".join(found.reasons)[:39]}))
-    if found.source != "model":
+    if found.picks and found.source != "model":
         st.degraded = True
-    choice = st.inputs.get("choice_id") or (found.picks[0].id if found.picks else None)
-    if choice is None:
-        raise ValueError("no car in the research pack fits that segment and budget")
+    if not found.picks:                                            # nothing fits the segment and budget (or nothing has a cited price)
+        if st.inputs.get("choice_id"):
+            raise ChoiceNotInPicks(st.inputs["choice_id"])
+        st.facts = {}
+        st.buy = BuyAnalysis(no_options=True, verdict=None, query=query, picks=[], research_source=found.source, chosen=None, plans=None, answer=buy_advisor.no_options_answer())  # type: ignore[arg-type]
+        return
+    choice = st.inputs.get("choice_id") or found.picks[0].id
+    if choice not in {p.id for p in found.picks}:
+        raise ChoiceNotInPicks(choice)
     tool = session_tool(st.profile, "buy_plans")
     _say(st, "compute", "start", stream_mod.LABELS["buyplans"][0])
     plans, ok = await _timed(st, "tool", "buy_plans", tool.arun({"vehicle_id": choice}))
@@ -362,7 +372,7 @@ async def _pipeline_buy(st: _State) -> None:
                                       "reasons": ",".join(ans.diagnostics.final_reasons or ans.diagnostics.first_reasons)[:39]}))
     if ans.source != "model":
         st.degraded = True
-    st.buy = BuyAnalysis(verdict=plans.verdict, query=query, picks=found.picks, research_source=found.source, choice_id=choice, plans=plans, answer=ans)  # type: ignore[arg-type]
+    st.buy = BuyAnalysis(verdict=plans.verdict, query=query, picks=found.picks, research_source=found.source, chosen=choice, plans=plans, answer=ans)  # type: ignore[arg-type]
 
 
 # ---- the run -------------------------------------------------------------------------------------------------------------------
@@ -371,7 +381,7 @@ def _assemble(st: _State, data_version: str) -> AnalysisResult:
     return AnalysisResult(
         run_id=st.run_id, event=st.spec.name, feature=st.spec.feature, customer_id=st.profile.id, as_of=st.profile.as_of_date.isoformat(),
         prompt_version=PROMPT_VERSION, data_version=data_version, inputs=st.inputs, compute=st.compute, facts=st.facts or {},
-        status=st.payoff.verdict if st.payoff else st.buy.verdict if st.buy else (st.facts or {}).get("overall_status"), summary=st.summary, advice=st.advice,
+        status=st.payoff.verdict if st.payoff else (st.buy.verdict or "no_options") if st.buy else (st.facts or {}).get("overall_status"), summary=st.summary, advice=st.advice,
         payoff=st.payoff, buy=st.buy, trace=st.trace, llm_trace=st.llm_trace, degraded=st.degraded)
 
 
@@ -411,7 +421,7 @@ async def _execute(st: _State, data_version: str) -> AnalysisResult:
             st.degraded = True
             st.trace.append(TraceStep(kind="fallback", name="timeout", ok=False, detail={"limit_s": RUN_TIMEOUT_S}))
             ans = buy_advisor._template_answer(plans, pf, "run_timeout", buy_advisor._Tally())
-            st.buy = BuyAnalysis(verdict=plans.verdict, query=query, picks=found.picks, research_source=found.source, choice_id=choice, plans=plans, answer=ans)
+            st.buy = BuyAnalysis(verdict=plans.verdict, query=query, picks=found.picks, research_source=found.source, chosen=choice, plans=plans, answer=ans)
             return _assemble(st, data_version)
         if st.spec.pipeline == "payoff":
             if st.pf_parts is None:             # no figures yet: nothing to show

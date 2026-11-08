@@ -6,7 +6,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from ..engine.simulate import PayoffSimulation
-from ..formulas.buy import BuyPlans
+from ..formulas.buy import BuyPlans, SourceRef
 from ..formulas.payoff import Recommendation, StrategySummary
 from ..research.sanitize import BuyQuery
 
@@ -126,9 +126,27 @@ class SourceLine(BaseModel):
     url: str
 
 
+class Figure(BaseModel):
+    """One cited figure, straight from the research pack. value is None when the pack has no verified figure (source then says where it was
+    looked for, if anywhere)."""
+    value: float | str | None
+    unit: str
+    model_year: int | None
+    source: SourceRef | None
+
+
+class PickFigures(BaseModel):
+    msrp: Figure
+    model_year: Figure                       # the vehicle's model year, sourced from its price page (or its fuel-economy record)
+    mpg_combined: Figure
+    nhtsa_stars: Figure
+    iihs_award: Figure
+
+
 class ResearchPick(BaseModel):
     id: str
     name: str
+    figures: PickFigures
     why_text: str                            # words from the Researcher (or the code template), figures from the pack
     source: Literal["model", "template"]
     sources: list[SourceLine]                # the UI source line: title + date, with the url as a link
@@ -139,12 +157,13 @@ BuyVerdict = Literal["affordable", "stretch", "not_now"]
 
 class BuyAnalysis(BaseModel):
     """The simulate_buy event's result: the cars the Researcher picked, three ways to pay for the chosen one, and the answer."""
-    verdict: BuyVerdict                      # set by code
+    no_options: bool = False                 # no car in the pack fits the segment and budget: picks is empty, chosen is None
+    verdict: BuyVerdict | None               # set by code; None when there are no options
     query: BuyQuery                          # what the Researcher was told (and all it was told)
     picks: list[ResearchPick]
     research_source: Literal["model", "template"]
-    choice_id: str
-    plans: BuyPlans
+    chosen: str | None                       # the car the plans are for: the caller's choice, else the top pick
+    plans: BuyPlans | None
     answer: PayoffAnswer
 
 

@@ -53,6 +53,8 @@ async def run_event(event: str, request: Request, refresh: int = 0, user: User =
         result = await orchestrator.run(event, profile, body, refresh=bool(refresh))
     except ValidationError as exc:
         raise HTTPException(status_code=422, detail=json.loads(exc.json(include_url=False, include_context=False, include_input=False)))
+    except orchestrator.ChoiceNotInPicks:
+        raise HTTPException(status_code=422, detail="choice_id is not one of the cars offered for this query")
     except RunSuperseded:
         raise HTTPException(status_code=409, detail="superseded by a newer run")
     except TimeoutError:

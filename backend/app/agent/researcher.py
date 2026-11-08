@@ -15,7 +15,8 @@ from ..llm import client, grounding
 from ..research import pack
 from ..research.sanitize import BuyQuery
 from .advisor import tidy, usd
-from .models import ResearchPick, SourceLine
+from ..formulas.buy import SourceRef
+from .models import Figure, PickFigures, ResearchPick, SourceLine
 
 MAX_PICKS = 3
 
@@ -124,8 +125,21 @@ def view(q: BuyQuery, entries: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def _figure(r: dict, value=None, year=None) -> Figure:
+    """A pack record as a Figure; a record without a value keeps its source only if the pack says where it looked."""
+    src = SourceRef(source_title=r["source_title"], url=r["url"], fetched_at=r["fetched_at"]) if r["url"] and r["source_title"] else None
+    return Figure(value=r["value"] if value is None else value, unit=r["unit"], model_year=r["model_year"] if year is None else year, source=src)
+
+
+def figures_for(v: dict) -> PickFigures:
+    anchor = v["msrp"] if v["msrp"]["value"] is not None else v["mpg_combined"]
+    year = _figure(anchor, value=v["model_year"], year=v["model_year"]).model_copy(update={"unit": "year"})
+    return PickFigures(msrp=_figure(v["msrp"]), model_year=year, mpg_combined=_figure(v["mpg_combined"]), nhtsa_stars=_figure(v["nhtsa_stars"]),
+                       iihs_award=_figure(v["iihs_award"]))
+
+
 def _pick(v: dict, why: str, source: str) -> ResearchPick:
-    return ResearchPick(id=v["id"], name=v["name"], why_text=why, source=source, sources=sources_for(v))  # type: ignore[arg-type]
+    return ResearchPick(id=v["id"], name=v["name"], figures=figures_for(v), why_text=why, source=source, sources=sources_for(v))  # type: ignore[arg-type]
 
 
 @dataclass

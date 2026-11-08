@@ -41,9 +41,11 @@ const chips = (p: Plan): string[] => {
 
 export function toBuyView(b: BuyAnalysis): BuyView {
   const pl = b.plans;
+  // no_options (nothing fits the segment and budget) has no plans or chosen car: the page has no screen for it yet, so it takes its failed state
+  if (b.no_options || !pl || !b.verdict || !b.chosen) throw new Error("no options");
   const order = ["cash", "finance", "mix"];
   return {
-    verdict: b.verdict, answer: b.answer.text, choiceId: b.choice_id,
+    verdict: b.verdict, answer: b.answer.text, choiceId: b.chosen,
     query: { segment: b.query.segment, budgetBand: b.query.budget_band ?? null, priorities: b.query.priorities ?? [] },
     picks: b.picks.map((p) => ({ id: p.id, name: p.name, why: p.why_text, sources: p.sources.map((s) => ({ figure: s.figure, title: s.source_title, fetchedAt: s.fetched_at, url: s.url })) })),
     car: { name: pl.vehicle_name, price: pl.price, apr: pl.loan_apr, creditTier: pl.credit_tier, savingsRate: pl.savings_rate },

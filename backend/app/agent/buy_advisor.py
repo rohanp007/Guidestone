@@ -145,3 +145,10 @@ async def _with_model(p: BuyPlans, pf: PayoffFacts, t: _Tally) -> PayoffAnswer:
         return _answer(template_text(p, pf), "template", t)
     t.checked = len(report.numbers)
     return _answer(text, "model", t)
+
+
+def no_options_answer() -> PayoffAnswer:
+    """No car fits: a fixed sentence, no model call."""
+    t = _Tally(first_ok=True)
+    t.first_reasons = t.final_reasons = ["no_options"]
+    return _answer("No car in the research pack fits that segment and budget, so there is nothing to compare yet.", "template", t)

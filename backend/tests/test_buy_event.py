@@ -64,7 +64,7 @@ def test_C095_affordable_cash(profiles):
     r = go(profiles["C095"], f)
     b = r.buy
     assert r.status == "affordable" and b.verdict == "affordable" and b.plans.recommended == "cash" and not r.degraded
-    assert [p.id for p in b.picks] == ["honda_crv", "mazda_cx5"] and b.choice_id == "honda_crv" and b.research_source == "model"     # priced cars under $35k band
+    assert [p.id for p in b.picks] == ["honda_crv", "mazda_cx5"] and b.chosen == "honda_crv" and b.research_source == "model"     # priced cars under $35k band
     assert b.picks[0].why_text == "It starts at $30,920 and gets 30 mpg combined."
     assert {s.figure for s in b.picks[0].sources} == {"msrp", "mpg_combined", "nhtsa_stars"}
     assert all(s.url.startswith("https://") and s.fetched_at == "2026-11-08" and s.source_title for p in b.picks for s in p.sources)
@@ -76,7 +76,7 @@ def test_C095_affordable_cash(profiles):
 def test_C002_is_not_now_and_the_answer_says_why(profiles):
     r = go(profiles["C002"], Fake(), {"segment": "midsize_sedan", "budget": 31_000, "priorities": ["mpg"]})
     b = r.buy
-    assert b.verdict == "not_now" and b.plans.recommended == "finance" and b.choice_id in ("honda_accord",)
+    assert b.verdict == "not_now" and b.plans.recommended == "finance" and b.chosen in ("honda_accord",)
     assert b.answer.source == "model" and "of your gross income" in b.answer.text and "under your cushion target" in b.answer.text
     assert "10.0%" in b.answer.text and "14.8%" in b.answer.text
 
@@ -108,7 +108,7 @@ def test_model_off_serves_templates_everywhere(profiles):
     r = go(profiles["C095"], Fake(down=True))
     b = r.buy
     assert r.degraded and b.research_source == "template" and b.answer.source == "template" and b.verdict == "affordable"
-    assert b.choice_id == "mazda_cx5" and b.answer.text == "Paying $29,990 in cash for the Mazda CX-5 skips about $4,923 in loan interest."      # price first: the cheaper car
+    assert b.chosen == "mazda_cx5" and b.answer.text == "Paying $29,990 in cash for the Mazda CX-5 skips about $4,923 in loan interest."      # price first: the cheaper car
     assert len(b.picks) == 2 and b.picks[0].why_text.startswith("Mazda CX-5 starts at $29,990")
 
 
@@ -123,9 +123,79 @@ def test_the_top_three_by_code_score_follow_the_priorities():
     assert researcher.top_by_score(entries, sanitize({"segment": "compact_suv", "priorities": ["safety"]}))[0]["id"] in ("honda_crv", "mazda_cx5")      # one rating each, tie: price
 
 
-def test_no_car_fits(profiles):
-    with pytest.raises(ValueError):
-        go(profiles["C095"], Fake(), {"segment": "compact_suv", "budget": 5_000})
+def test_no_car_fits_returns_no_options_not_an_error(profiles):
+    f = Fake()
+    r = go(profiles["C095"], f, {"segment": "midsize_sedan", "budget": 15_000})
+    b = r.buy
+    assert r.status == "no_options" and b.no_options and b.picks == [] and b.chosen is None and b.plans is None and b.verdict is None
+    assert b.answer.source == "template" and "nothing to compare" in b.answer.text and f.calls == []         # no model was asked
+    assert r.facts == {} and not r.degraded
+
+
+def test_nothing_priced_or_no_segment_results_is_also_no_options(profiles, monkeypatch):
+    from app.research import pack
+    monkeypatch.setattr(pack, "price", lambda v: None)                       # every price null
+    assert go(profiles["C095"], Fake()).buy.no_options
+    cache.clear()
+    monkeypatch.undo()
+    monkeypatch.setattr(pack, "vehicles", lambda segment=None: [])           # an empty segment
+    assert go(profiles["C095"], Fake()).buy.no_options
+
+
+def test_a_choice_not_among_the_picks_is_a_422_not_a_500(profiles):
+    client.complete = Fake()
+    c = session_for("C095")
+    for body in ({**PARAMS, "choice_id": "honda_accord"},                                     # another segment
+                 {**PARAMS, "budget": 30_000, "choice_id": "honda_crv"},                    # over the budget band
+                 {"segment": "midsize_sedan", "budget": 15_000, "choice_id": "honda_accord"}):    # no options at all
+        r = c.post("/api/me/agent/simulate_buy", json=body)
+        assert r.status_code == 422, (body, r.status_code, r.text)
+    ok = c.post("/api/me/agent/simulate_buy", json={"segment": "midsize_sedan", "budget": 15_000})
+    assert ok.status_code == 200 and ok.json()["buy"]["no_options"] is True and ok.json()["buy"]["chosen"] is None and ok.json()["status"] == "no_options"
+
+
+@pytest.mark.parametrize("body", [{}, {"segment": "compact_suv"}, {"budget": 0}, {"budget": 4_999}, {"budget": 10_000_000}, {"segment": "midsize_sedan", "budget": 29_000},
+                                  {"priorities": []}, {"priorities": ["mpg", "mpg"]}, {"priorities": ["price", "mpg", "safety"]}, {"budget": 1.5},
+                                  {"segment": "midsize_sedan", "priorities": ["safety"], "budget": 100_000}])
+def test_no_valid_input_is_a_server_error(body):
+    client.complete = Fake()
+    for cid in ("C095", "C002", "C010"):
+        r = session_for(cid).post("/api/me/agent/simulate_buy", json=body)
+        assert r.status_code == 200, (cid, body, r.status_code, r.text[:200])
+        assert r.json()["buy"] is not None
+    for bad in ({"budget": -1}, {"segment": "boat"}, {"priorities": ["color"]}, {"priorities": ["price"] * 4}, {"budget": "lots"}, {"choice_id": 7}, {"choice_id": "nope"}):
+        assert session_for("C095").post("/api/me/agent/simulate_buy", json=bad).status_code == 422, bad
+
+
+def test_every_pick_carries_its_cited_figures(profiles):
+    import json
+    from pathlib import Path
+    pack_ = {v["id"]: v for v in json.loads((Path(__file__).resolve().parent.parent / "app" / "research" / "cars.json").read_text())["vehicles"]}
+    b = go(profiles["C095"], Fake()).buy
+    assert [p.id for p in b.picks] == ["honda_crv", "mazda_cx5"]
+    for p in b.picks:
+        v = pack_[p.id]
+        for name in ("msrp", "mpg_combined", "nhtsa_stars", "iihs_award"):
+            f, rec = getattr(p.figures, name), v[name]
+            assert f.value == rec["value"] and f.unit == rec["unit"] and f.model_year == rec["model_year"]
+            if rec["url"]:
+                assert (f.source.source_title, f.source.url, f.source.fetched_at) == (rec["source_title"], rec["url"], rec["fetched_at"])
+            else:
+                assert f.source is None
+        assert p.figures.model_year.value == v["model_year"] and p.figures.model_year.source.url == v["msrp"]["url"]
+    mazda = next(p for p in b.picks if p.id == "mazda_cx5").figures
+    assert mazda.nhtsa_stars.value is None and mazda.nhtsa_stars.source.url.startswith("https://api.nhtsa.gov/")      # null, with where it looked
+    assert mazda.msrp.value == 29_990 and mazda.iihs_award.value == "Top Safety Pick+"
+
+
+def test_the_plan_carries_its_apr_source_and_the_recommended_plans_bands(profiles):
+    p = go(profiles["C095"], Fake(), {**PARAMS, "choice_id": "honda_crv"}).buy.plans
+    assert p.apr_source.url.startswith("https://www.bankrate.com/") and p.apr_source.fetched_at == "2026-11-08" and "Bankrate" in p.apr_source.source_title
+    assert p.plans["finance"].apr_source == p.apr_source and p.plans["cash"].apr_source is None            # a cash plan has no loan
+    assert len(p.baseline_monthly) == len(p.scenario_monthly) >= 6
+    for m in p.scenario_monthly + p.baseline_monthly:
+        assert m.p10 <= m.p50 <= m.p90
+    assert p.scenario_monthly[0].p50 < p.baseline_monthly[0].p50                                          # cash leaves at month 0
 
 
 def test_the_endpoint_and_the_stream(profiles):

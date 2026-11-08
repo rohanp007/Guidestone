@@ -619,10 +619,12 @@ export interface components {
          */
         BuyAnalysis: {
             /**
-             * Verdict
-             * @enum {string}
+             * No Options
+             * @default false
              */
-            verdict: "affordable" | "stretch" | "not_now";
+            no_options?: boolean;
+            /** Verdict */
+            verdict: ("affordable" | "stretch" | "not_now") | null;
             query: components["schemas"]["BuyQuery"];
             /** Picks */
             picks: components["schemas"]["ResearchPick"][];
@@ -631,9 +633,9 @@ export interface components {
              * @enum {string}
              */
             research_source: "model" | "template";
-            /** Choice Id */
-            choice_id: string;
-            plans: components["schemas"]["BuyPlans"];
+            /** Chosen */
+            chosen: string | null;
+            plans: components["schemas"]["BuyPlans"] | null;
             answer: components["schemas"]["PayoffAnswer"];
         };
         /** BuyPlan */
@@ -670,6 +672,7 @@ export interface components {
             cushion_shortfall: number;
             /** Cushion Holds */
             cushion_holds: boolean;
+            apr_source?: components["schemas"]["SourceRef"] | null;
             /**
              * Same As Cash
              * @default false
@@ -701,6 +704,7 @@ export interface components {
             safe_lump_sum: number;
             /** Gross Monthly */
             gross_monthly: number;
+            apr_source: components["schemas"]["SourceRef"];
             /** Plans */
             plans: {
                 [key: string]: components["schemas"]["BuyPlan"];
@@ -724,6 +728,10 @@ export interface components {
             payment_ok: boolean;
             /** Cushion Holds */
             cushion_holds: boolean;
+            /** Baseline Monthly */
+            baseline_monthly?: components["schemas"]["MonthEndPoint"][] | null;
+            /** Scenario Monthly */
+            scenario_monthly?: components["schemas"]["MonthEndPoint"][] | null;
         };
         /** BuyQuery */
         BuyQuery: {
@@ -792,6 +800,20 @@ export interface components {
         Dependent: {
             /** Age */
             age: number;
+        };
+        /**
+         * Figure
+         * @description One cited figure, straight from the research pack. value is None when the pack has no verified figure (source then says where it was
+         *     looked for, if anywhere).
+         */
+        Figure: {
+            /** Value */
+            value: number | string | null;
+            /** Unit */
+            unit: string;
+            /** Model Year */
+            model_year: number | null;
+            source: components["schemas"]["SourceRef"] | null;
         };
         /** ForecastEvent */
         ForecastEvent: {
@@ -1102,6 +1124,14 @@ export interface components {
             /** P90 */
             p90: number[];
         };
+        /** PickFigures */
+        PickFigures: {
+            msrp: components["schemas"]["Figure"];
+            model_year: components["schemas"]["Figure"];
+            mpg_combined: components["schemas"]["Figure"];
+            nhtsa_stars: components["schemas"]["Figure"];
+            iihs_award: components["schemas"]["Figure"];
+        };
         /** Profile */
         Profile: {
             /** Id */
@@ -1279,6 +1309,7 @@ export interface components {
             id: string;
             /** Name */
             name: string;
+            figures: components["schemas"]["PickFigures"];
             /** Why Text */
             why_text: string;
             /**
@@ -1417,6 +1448,18 @@ export interface components {
             fetched_at: string;
             /** Url */
             url: string;
+        };
+        /**
+         * SourceRef
+         * @description Where a figure came from: shown as title + date, with the url as a link.
+         */
+        SourceRef: {
+            /** Source Title */
+            source_title: string;
+            /** Url */
+            url: string;
+            /** Fetched At */
+            fetched_at: string;
         };
         /**
          * SpendingProfile

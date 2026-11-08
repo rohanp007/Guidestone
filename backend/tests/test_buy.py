@@ -54,7 +54,7 @@ def test_recommendation_rules(profiles, monkeypatch):
     assert r.recommended == "mix" and r.recommended_reason == "cash_would_break_cushion" and r.plans["mix"].down_payment == r.safe_lump_sum
     assert r.plans["mix"].loan_amount == pytest.approx(60_000 - r.safe_lump_sum, abs=0.01) and not r.plans["cash"].cushion_holds
     monkeypatch.setattr(pack, "price", lambda v: 30_920.0)
-    monkeypatch.setattr(pack, "apr_for_score", lambda s, c="new": (0.02, {"tier": "super_prime"}))      # the loan is cheaper than savings earn
+    monkeypatch.setattr(pack, "apr_for_score", lambda s, c="new": (0.02, pack.load()["auto_apr_by_tier"][0]))      # the loan is cheaper than savings earn
     r = buy.buy_plans_for(p, "honda_crv")
     assert r.recommended == "finance" and r.recommended_reason == "loan_cheaper_than_savings"
 
