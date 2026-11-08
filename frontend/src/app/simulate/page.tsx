@@ -1,0 +1,34 @@
+import type { Metadata } from "next";
+import Link from "next/link";
+import PageShell from "@/components/shell/PageShell";
+
+export const metadata: Metadata = { title: "Simulate · Guidestone" };
+
+export default function SimulatePage() {
+  return (
+    <PageShell active="simulate" title="Simulate">
+      {() => (
+        <div className="fade-in py-8 sm:py-10">
+          <p className="label">Simulate</p>
+          <p className="mt-2 max-w-[56ch] text-[20px] font-medium leading-snug text-navy">Try a decision against your own numbers before you make it.</p>
+          <ul className="mt-8 grid gap-4 sm:grid-cols-2">
+            <li>
+              <Link href="/simulate/payoff" className="press row-hover block rounded-[6px] border border-line-strong bg-surface p-5">
+                <span className="text-[18px] font-medium">Pay off debt</span>
+                <span className="mt-1 block text-[15px] text-ink-2">See whether to pay down your cards and loans, which order to do it in, and what it does to your cash.</span>
+                <span className="mt-3 block text-[14px] font-medium text-navy">Start →</span>
+              </Link>
+            </li>
+            <li>
+              <div aria-disabled="true" className="rounded-[6px] border border-line bg-surface p-5 text-ink-2">
+                <span className="text-[18px] font-medium">Buy</span>
+                <span className="ml-2 rounded-[6px] border border-line-strong px-1.5 py-px text-[11px] uppercase tracking-wide">soon</span>
+                <span className="mt-1 block text-[15px]">Check what a car, a home or a big purchase would do to your cash and your debt.</span>
+              </div>
+            </li>
+          </ul>
+        </div>
+      )}
+    </PageShell>
+  );
+}

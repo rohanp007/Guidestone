@@ -1,11 +1,12 @@
 "use client";
+import Link from "next/link";
 import type { ReactNode } from "react";
 import type { Profile } from "@/lib/api";
 import { dateLong, money0, money2, percent, percent2 } from "@/lib/format";
 import { Section, Skeleton, Unavailable, type Load } from "./ui";
 
 type Account = Profile["accounts"][number];
-type Row = { key: string; name: string; sub?: string; facts: ReactNode[]; amount: number; owed?: boolean; estimated?: boolean };
+type Row = { payoff?: boolean; key: string; name: string; sub?: string; facts: ReactNode[]; amount: number; owed?: boolean; estimated?: boolean };
 type Group = { title: string; rows: Row[] };
 
 const NAMES: Record<string, string> = {
@@ -49,7 +50,7 @@ function row(a: Account, profile: Profile): Row {
     key: a.id,
     name: a.type === "ira" ? `${title(a.subtype || "")} IRA`.trim() : NAMES[a.type] ?? title(a.type),
     sub: a.subtype && a.type !== "ira" && a.type !== "credit_card" && a.subtype !== "estimated" ? title(a.subtype) : undefined,
-    facts, amount: a.balance, estimated: a.type === "home" || a.type === "vehicle",
+    facts, amount: a.balance, payoff: a.type === "credit_card" || a.type === "auto_loan" || a.type === "personal_loan" || a.type === "mortgage", estimated: a.type === "home" || a.type === "vehicle",
   } as Row;
 }
 
@@ -86,6 +87,7 @@ export default function AccountGroups({ load }: { load: Load<Profile> }) {
                     {r.sub && <span className="ml-2 text-[14px] text-ink-2">{r.sub}</span>}
                     {r.estimated && <span className="ml-2 rounded-[6px] border border-line-strong px-1.5 py-px text-[12px] text-ink-2">Estimated value</span>}
                     {r.facts.length > 0 && <div className="mt-0.5 flex flex-wrap items-center gap-x-4 gap-y-0.5">{r.facts}</div>}
+                    {r.payoff && <Link href="/simulate/payoff" className="mt-1 inline-block text-[14px] font-medium text-navy underline-offset-2 hover:underline">See payoff options →</Link>}
                   </div>
                   <div className="num text-right text-[16px]">{money2(r.amount)}{r.owed && <span className="block text-[13px] text-ink-2">owed</span>}</div>
                 </li>

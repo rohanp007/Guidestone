@@ -18,6 +18,7 @@ export type ForecastArgs = Schemas["ForecastArgs"];
 export type Me = Schemas["Me"];
 export type DemoPersona = Schemas["DemoPersona"];
 export type AnalysisResult = Schemas["AnalysisResult"];
+export type PayoffAnalysis = NonNullable<AnalysisResult["payoff"]>;
 export type MyStatus = Schemas["Status"];
 export type RecurringItem = Schemas["RecurringItem"];
 export type Advice = NonNullable<AnalysisResult["advice"]>;
@@ -95,10 +96,10 @@ export const paycheckToPaycheck = (id: string) => runFormula<PaycheckToPaycheck>
 
 /** Run an orchestrator event for the signed-in customer. Returns null when a newer run replaced this one (409): that is expected
  *  (the sign-in warm-up, a refresh), so callers just ignore it and use the newer run's result instead of showing an error. */
-export async function runAgent(event: string, opts: { refresh?: boolean; params?: Record<string, unknown> } = {}): Promise<{ result: AnalysisResult; cached: boolean } | null> {
+export async function runAgent(event: string, opts: { refresh?: boolean; params?: Record<string, unknown>; signal?: AbortSignal } = {}): Promise<{ result: AnalysisResult; cached: boolean } | null> {
   try {
     const { data, headers } = await request<AnalysisResult>(`/api/me/agent/${encodeURIComponent(event)}${query({ refresh: opts.refresh ? 1 : undefined })}`, {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(opts.params ?? {}),
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(opts.params ?? {}), signal: opts.signal,
     });
     return { result: data, cached: headers.get("X-Cache") === "hit" };
   } catch (e) {
@@ -106,3 +107,7 @@ export async function runAgent(event: string, opts: { refresh?: boolean; params?
     throw e;
   }
 }
+
+let meOnce: Promise<Me> | null = null;
+/** One /api/me request shared by every page component (a failure is not remembered, so a retry can succeed). */
+export const getMeOnce = () => (meOnce ??= getMe().catch((e) => { meOnce = null; throw e; }));

@@ -1,6 +1,6 @@
 "use client";
 import { useRouter } from "next/navigation";
-import { getMe, getMyForecast, getMyProfile, getMyRecurring, getMyStatus, getMyTransactions, logout, type Transaction } from "@/lib/api";
+import { getMeOnce, getMyForecast, getMyProfile, getMyRecurring, getMyStatus, getMyTransactions, logout, type Transaction } from "@/lib/api";
 import { isoOf, parseDay } from "@/lib/format";
 import AccountGroups from "./AccountGroups";
 import AdvisorCard from "./AdvisorCard";
@@ -21,9 +21,6 @@ async function fetchAll(params: { start: string; flow_class?: string }): Promise
     if (out.length >= r.total || r.items.length === 0) return out;
   }
 }
-let meOnce: ReturnType<typeof getMe> | null = null;
-/** One /api/me request shared by everything on the page. */
-const getMeOnce = () => (meOnce ??= getMe().catch((e) => { meOnce = null; throw e; }));
 const daysBefore = (iso: string, n: number) => { const d = parseDay(iso); d.setDate(d.getDate() - n); return isoOf(d.getTime()); };
 const monthsBefore = (iso: string, n: number) => { const d = parseDay(iso); return isoOf(new Date(d.getFullYear(), d.getMonth() - n + 1, 1).getTime()); };
 

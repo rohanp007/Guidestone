@@ -17,11 +17,14 @@ export function niceTicks(min: number, max: number, target = 5): number[] {
   return out;
 }
 
-export const Swatch = ({ kind }: { kind: "line" | "band" | "dash" | "dot" | "zero" }) => {
+export const Swatch = ({ kind }: { kind: "line" | "mutedline" | "band" | "dash" | "dot" | "zero" | "shade" | "dotted" }) => {
   const s = {
     line: <span className="h-0.5 w-5 rounded bg-navy" />,
+    mutedline: <span className="w-5 border-t-2 border-dashed border-ink-3" />,
+    shade: <span className="h-3 w-5 rounded-[2px] bg-orange-tint" />,
     band: <span className="h-3 w-5 rounded-[2px] border border-line-strong bg-navy-tint" />,
     dash: <span className="w-5 border-t-2 border-dashed border-ink-2" />,
+    dotted: <span className="w-5 border-t-2 border-dotted border-ink-2" />,
     zero: <span className="h-px w-5 bg-ink" />,
     dot: <span className="h-2.5 w-2.5 rounded-full bg-orange" />,
   }[kind];

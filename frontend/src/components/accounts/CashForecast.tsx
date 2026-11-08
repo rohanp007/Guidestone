@@ -1,15 +1,13 @@
 "use client";
 import { useMemo } from "react";
-import { Area, CartesianGrid, ComposedChart, Line, ReferenceDot, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import type { LiquidForecast } from "@/lib/api";
-import { compactMoney, dateLong, dateShort, isoOf, money0, parseDay } from "@/lib/format";
-import { C } from "@/lib/tokens";
-import { AXIS, DRAW_MS, niceTicks, Swatch, TooltipCard, usePrefersReducedMotion } from "./chartkit";
+import { dateLong, dateShort, isoOf, money0, parseDay } from "@/lib/format";
+import ForecastBand, { type BandPoint } from "@/components/charts/ForecastBand";
 import { Section, Skeleton, Unavailable, type Load } from "./ui";
 
 const DAY = 86_400_000;
 const HORIZON_DAYS = 180;
-type Pt = { t: number; p10: number; p50: number; p90: number; band: number };
+type Pt = BandPoint & { band: number };
 
 /** One daily point per day over the whole horizon (the API sends a daily band for every day), so the resolution never changes. */
 export function toPoints(f: LiquidForecast): Pt[] {
@@ -20,7 +18,7 @@ export function toPoints(f: LiquidForecast): Pt[] {
 }
 
 /** Runs of consecutive days where the median path is under the cushion, as [first day, last day] (ms). */
-export function belowRuns(pts: Pt[], cushion: number): [number, number][] {
+export function belowRuns(pts: BandPoint[], cushion: number): [number, number][] {
   const runs: [number, number][] = [];
   for (const p of pts) {
     if (p.p50 >= cushion) continue;
@@ -44,70 +42,19 @@ function summary(f: LiquidForecast, pts: Pt[]): string {
 }
 
 export default function CashForecast({ load }: { load: Load<LiquidForecast> }) {
-  const reduce = usePrefersReducedMotion();
   const f = load.data;
   const pts = useMemo(() => (f ? toPoints(f) : []), [f]);
   const events = useMemo(() => (f ? f.events.filter((e) => { const t = parseDay(e.day).getTime(); return pts.length && t > pts[0].t && t <= pts[pts.length - 1].t; }) : []), [f, pts]);
-  const cushion = f?.cushion_risk.buffer ?? 0;
-  const ticks = useMemo(() => (pts.length ? niceTicks(Math.min(0, cushion, ...pts.map((p) => p.p10)), Math.max(cushion, ...pts.map((p) => p.p90))) : []), [pts, cushion]);
-  const xTicks = useMemo(() => {
-    if (!pts.length) return [];
-    const out: number[] = [];
-    const a = new Date(pts[0].t), end = pts[pts.length - 1].t;
-    for (let d = new Date(a.getFullYear(), a.getMonth() + 1, 1); d.getTime() <= end; d = new Date(d.getFullYear(), d.getMonth() + 1, 1)) out.push(d.getTime());
-    return out;
-  }, [pts]);
-  const yAt = (t: number) => pts.reduce((best, p) => (Math.abs(p.t - t) < Math.abs(best.t - t) ? p : best), pts[0]).p50;
-  const eventsFor = (t: number) => {
-    const i = pts.findIndex((p) => p.t === t);
-    const prev = i > 0 ? pts[i - 1].t : -Infinity;
-    return events.filter((e) => { const et = parseDay(e.day).getTime(); return et > prev && et <= t; });
-  };
+  const series = useMemo(() => [{ id: "cash", label: "Median", points: pts, tone: "primary" as const, band: true }], [pts]);
+  const markers = useMemo(() => events.map((e) => ({ t: parseDay(e.day).getTime(), description: e.description })), [events]);
 
   return (
     <Section id="forecast-h" title="Cash forecast" aside="Next 180 days">
       {load.error && <Unavailable>The cash forecast is unavailable right now.</Unavailable>}
       {!f && !load.error && <Skeleton className="h-[280px] w-full" />}
       {f && pts.length > 0 && (
-        <figure>
-          <figcaption className="text-[15px] text-ink-2">{summary(f, pts)}</figcaption>
-          <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-1 text-[13px] text-ink-2">
-            <span className="inline-flex items-center gap-2"><Swatch kind="line" /> Median</span>
-            <span className="inline-flex items-center gap-2"><Swatch kind="band" /> Likely range (10th–90th)</span>
-            <span className="inline-flex items-center gap-2"><Swatch kind="dash" /> 1-month cushion</span>
-            <span className="inline-flex items-center gap-2"><Swatch kind="zero" /> $0</span>
-            {events.length > 0 && <span className="inline-flex items-center gap-2"><Swatch kind="dot" /> Event</span>}
-          </div>
-          <div className="mt-3 h-[260px] w-full sm:h-[300px]" role="img" aria-label={summary(f, pts)}>
-            <ResponsiveContainer>
-              <ComposedChart data={pts} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
-                <CartesianGrid vertical={false} stroke={C.line} />
-                <XAxis dataKey="t" type="number" scale="time" domain={[pts[0].t, pts[pts.length - 1].t]} ticks={xTicks}
-                  tickFormatter={(t: number) => new Intl.DateTimeFormat("en-US", { month: "short" }).format(t)} tick={AXIS} tickLine={false} axisLine={{ stroke: C.lineStrong }} tickMargin={6} />
-                <YAxis tick={AXIS} tickLine={false} axisLine={false} width={52} tickFormatter={compactMoney} ticks={ticks} domain={[ticks[0], ticks[ticks.length - 1]]} interval={0} />
-                <Tooltip cursor={{ stroke: C.ink3, strokeWidth: 1 }} isAnimationActive={false}
-                  content={({ active, payload }) => {
-                    const p: Pt | undefined = active ? payload?.[0]?.payload : undefined;
-                    if (!p) return null;
-                    return (
-                      <TooltipCard>
-                        <div className="label !text-[11px]">{dateLong(isoOf(p.t))}</div>
-                        <div className="num mt-1 text-[16px] font-medium">{money0(p.p50)}</div>
-                        <div className="num text-ink-2">{money0(p.p10)} – {money0(p.p90)}</div>
-                        {eventsFor(p.t).map((e, i) => <div key={i} className="mt-1.5 max-w-[240px] text-ink-2">{e.description}</div>)}
-                      </TooltipCard>
-                    );
-                  }} />
-                <Area dataKey="p10" stackId="band" stroke="none" fill="transparent" isAnimationActive={false} activeDot={false} />
-                <Area dataKey="band" stackId="band" stroke="none" fill={C.navyTint} fillOpacity={1} activeDot={false} isAnimationActive={!reduce} animationDuration={DRAW_MS} animationEasing="ease-out" />
-                <ReferenceLine y={0} stroke={C.ink} strokeWidth={1} />
-                <ReferenceLine y={cushion} stroke={C.ink2} strokeDasharray="4 4" label={{ value: "1-month cushion", position: "insideBottomRight", fill: C.ink2, fontSize: 12, fontFamily: AXIS.fontFamily }} />
-                <Line dataKey="p50" stroke={C.navy} strokeWidth={2} dot={false} activeDot={{ r: 4, fill: C.navy, stroke: C.surface, strokeWidth: 2 }}
-                  isAnimationActive={!reduce} animationDuration={DRAW_MS} animationEasing="ease-out" />
-                {events.map((e) => { const t = parseDay(e.day).getTime(); return <ReferenceDot key={`${e.kind}-${e.day}`} x={t} y={yAt(t)} r={5} fill={C.orange} stroke={C.surface} strokeWidth={2} ifOverflow="visible" />; })}
-              </ComposedChart>
-            </ResponsiveContainer>
-          </div>
+        <ForecastBand series={series} summary={summary(f, pts)} summaryText={summary(f, pts)} markers={markers} tableStepDays={7}
+          refLines={[{ y: f.cushion_risk.buffer, label: "1-month cushion", style: "dash" }, { y: 0, label: "$0", style: "zero" }]}>
           {events.length > 0 && (
             <ul className="mt-4 space-y-1.5 text-[14px]">
               {events.map((e) => (
@@ -118,17 +65,7 @@ export default function CashForecast({ load }: { load: Load<LiquidForecast> }) {
           <p className="mt-4 text-[13px] text-ink-2">
             The range is a simulation, not a promise. On customers the model had never seen, the 80% band contained the actual outcome 82% of the time at month-end (84% of days).
           </p>
-          <details className="mt-3 text-[13px] text-ink-2">
-            <summary className="cursor-pointer select-none">View as table</summary>
-            <div className="mt-2 max-h-64 overflow-auto">
-              <table className="num w-full text-left">
-                <thead><tr><th className="py-1 pr-4 font-medium">Date</th><th className="pr-4 text-right font-medium">10th</th><th className="pr-4 text-right font-medium">Median</th><th className="text-right font-medium">90th</th></tr></thead>
-                <tbody>{pts.filter((_, i) => i % 7 === 0 || i === pts.length - 1).map((p) => (
-                  <tr key={p.t} className="border-t border-line"><td className="py-1 pr-4">{dateShort(isoOf(p.t))}</td><td className="pr-4 text-right">{money0(p.p10)}</td><td className="pr-4 text-right">{money0(p.p50)}</td><td className="text-right">{money0(p.p90)}</td></tr>))}</tbody>
-              </table>
-            </div>
-          </details>
-        </figure>
+        </ForecastBand>
       )}
     </Section>
   );

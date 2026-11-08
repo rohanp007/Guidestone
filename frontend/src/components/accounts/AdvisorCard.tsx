@@ -1,4 +1,5 @@
 "use client";
+import Link from "next/link";
 import { runAgent, type Advice } from "@/lib/api";
 import { Badge, Skeleton, Unavailable, useLoad, type Tone } from "./ui";
 
@@ -7,6 +8,8 @@ const VERDICT: Record<Advice["verdict"], { label: string; tone: Tone }> = {
   plan_ahead: { label: "Plan ahead", tone: "fair" },
   on_track: { label: "On track", tone: "good" },
 };
+
+const PAYOFF_MOVES = new Set(["pay_card_high_apr", "pay_loan_high_apr"]);
 
 /** The advisor can take 20+ seconds, so the page never waits for it. A newer run replacing ours (409, e.g. the sign-in warm-up) is
  *  expected: ask again and get that run's result. */
@@ -46,6 +49,7 @@ export default function AdvisorCard() {
                 <div>
                   <h3 className="text-[17px] font-medium leading-snug">{m.title_text}</h3>
                   <p className="mt-1 text-[15px] text-ink-2">{m.why_text}</p>
+                  {PAYOFF_MOVES.has(m.move_code) && <Link href="/simulate/payoff" className="mt-1.5 inline-block text-[14px] font-medium text-navy underline-offset-2 hover:underline">See payoff options →</Link>}
                 </div>
               </li>
             ))}
