@@ -14,6 +14,7 @@
   --orange: #e8702a;
   --orange-tint: #fcebdf;
   --good: #2f7d5b;
+  --line-soft: #efebe3;
   --fair: #b7791f;
   --poor: #b4423a;
   --radius: 6px;
@@ -33,6 +34,9 @@
   --color-orange: var(--orange);
   --color-orange-tint: var(--orange-tint);
   --color-good: var(--good);
+  --color-fair: var(--fair);
+  --color-poor: var(--poor);
+  --color-line-soft: var(--line-soft);
   --font-sans: var(--font-plex-sans), system-ui, sans-serif;
   --font-mono: var(--font-plex-mono), ui-monospace, monospace;
 }
@@ -41,11 +45,14 @@ body {
   background: var(--bg);
   color: var(--ink);
   font-family: var(--font-sans);
-  font-size: 16px;
-  line-height: 1.5;
+  font-size: 17px;
+  line-height: 1.55;
   font-variant-numeric: tabular-nums;
 }
 
+.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.skeleton { background: var(--line-soft); border-radius: var(--radius); animation: pulse 1.4s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: 0.55; } }
 .label {
   font-family: var(--font-mono);
   font-size: 13px;
@@ -69,7 +76,7 @@ body {
   .row-hover:hover { background-color: color-mix(in srgb, var(--navy-tint) 55%, transparent); }
 }
 
-:focus-visible { outline: 2px solid var(--navy); outline-offset: 2px; border-radius: var(--radius); }
+:focus-visible { outline: 2px solid var(--orange); outline-offset: 2px; border-radius: var(--radius); }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; animation-delay: 0ms !important; transition-duration: 0.01ms !important; }

@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
 
 from . import auth, config
-from .api import agent as agent_api, formulas, meta, profiles
+from .api import agent as agent_api, formulas, me, meta, profiles
 from .api.serialize import SafeJSONResponse
 from .data import loader
 from .llm import client as llm_client
@@ -41,7 +41,7 @@ app = FastAPI(title="Guidestone", lifespan=lifespan, default_response_class=Safe
 # cookies need an explicit origin list: browsers refuse credentialed requests to "Access-Control-Allow-Origin: *"
 app.add_middleware(CORSMiddleware, allow_origins=ORIGINS, allow_credentials=True, allow_methods=["GET", "POST"],
                    allow_headers=["Content-Type"], expose_headers=["X-Compute-Ms", "X-Cache"])
-for module in (auth, meta, profiles, formulas, agent_api):
+for module in (auth, meta, profiles, formulas, agent_api, me):
     app.include_router(module.router)
 
 

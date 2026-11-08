@@ -225,6 +225,100 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/me/profile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** My Profile */
+        get: operations["my_profile_api_me_profile_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/transactions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** My Transactions */
+        get: operations["my_transactions_api_me_transactions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/forecast": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * My Forecast
+         * @description 180-day liquid-cash forecast: daily bands for the first 90 days, month-end points after that.
+         */
+        get: operations["my_forecast_api_me_forecast_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * My Status
+         * @description The cash-outlook status, decided in code from the forecast (the same rule the advisor uses). Fast: no model involved.
+         */
+        get: operations["my_status_api_me_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/recurring": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * My Recurring
+         * @description Income, bills and debt payments with the next expected date. Transfers to savings or investments are not bills.
+         */
+        get: operations["my_recurring_api_me_recurring_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -299,6 +393,27 @@ export interface components {
              */
             source: "model" | "template" | "mixed";
             grounding: components["schemas"]["GroundingSummary"];
+            diagnostics: components["schemas"]["AdviceDiagnostics"];
+        };
+        /**
+         * AdviceDiagnostics
+         * @description How the advisor's answer fared, as counts and reason codes only (never model text).
+         */
+        AdviceDiagnostics: {
+            /** First Try Ok */
+            first_try_ok: boolean;
+            /** Retried */
+            retried: boolean;
+            /** Model Calls */
+            model_calls: number;
+            /** Template Moves */
+            template_moves: number;
+            /** First Reasons */
+            first_reasons?: string[];
+            /** Bad Replies */
+            bad_replies?: components["schemas"]["BadReply"][];
+            /** Final Reasons */
+            final_reasons?: string[];
         };
         /** AdviceMove */
         AdviceMove: {
@@ -366,6 +481,15 @@ export interface components {
              */
             degraded?: boolean;
         };
+        /** Assumption */
+        Assumption: {
+            /** Value */
+            value: number;
+            /** Source */
+            source: string;
+            /** As Of */
+            as_of: string;
+        };
         /** AssumptionsResponse */
         AssumptionsResponse: {
             /** Assumptions */
@@ -380,6 +504,57 @@ export interface components {
             calibration_details?: {
                 [key: string]: unknown;
             } | null;
+        };
+        /**
+         * Backtest
+         * @description Rebuilt from the first 18 months only, forecast the rest, compared with the actual daily balance.
+         */
+        Backtest: {
+            /**
+             * Cutoff
+             * Format: date
+             */
+            cutoff: string;
+            /** Days */
+            days: number;
+            /** Avg Monthly Outflow */
+            avg_monthly_outflow: number;
+            /** Outflow Err 30D */
+            outflow_err_30d: number | null;
+            /** Outflow Err 90D */
+            outflow_err_90d: number | null;
+            /** Outflow Err 180D */
+            outflow_err_180d: number | null;
+            /** Net Change Err 30D */
+            net_change_err_30d: number | null;
+            /** Net Change Err 90D */
+            net_change_err_90d: number | null;
+            /** Net Change Err 180D */
+            net_change_err_180d: number | null;
+            /** Mape 30D */
+            mape_30d: number | null;
+            /** Mape 90D */
+            mape_90d: number | null;
+            /** Mape 180D */
+            mape_180d: number | null;
+            /** Band Coverage */
+            band_coverage: number | null;
+            /** Band Coverage Month End */
+            band_coverage_month_end?: number | null;
+            /** Known One Off */
+            known_one_off?: string | null;
+        };
+        /**
+         * BadReply
+         * @description One model reply that was not usable JSON: how it ended, never what it said. finish_reason "length" means it was cut off.
+         */
+        BadReply: {
+            /** Finish Reason */
+            finish_reason: string;
+            /** Completion Tokens */
+            completion_tokens: number;
+            /** Max Tokens */
+            max_tokens: number | null;
         };
         /** CategoryShare */
         CategoryShare: {
@@ -405,6 +580,28 @@ export interface components {
         Dependent: {
             /** Age */
             age: number;
+        };
+        /** ForecastEvent */
+        ForecastEvent: {
+            /**
+             * Day
+             * Format: date
+             */
+            day: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "raise" | "rent_renewal" | "loan_ends" | "cd_matures" | "lump_sum" | "income_change" | "extra_paycheck" | "double_payment";
+            /** Description */
+            description: string;
+            /** Monthly Impact */
+            monthly_impact?: number | null;
+            /**
+             * Assumed Timing
+             * @default false
+             */
+            assumed_timing?: boolean;
         };
         /** FormulaInfo */
         FormulaInfo: {
@@ -478,6 +675,44 @@ export interface components {
             /** Models Ready */
             models_ready: boolean;
         };
+        /** LiquidForecast */
+        LiquidForecast: {
+            /** Profile Id */
+            profile_id: string;
+            /**
+             * As Of Date
+             * Format: date
+             */
+            as_of_date: string;
+            /** Horizon Months */
+            horizon_months: number;
+            /** Paths */
+            paths: number;
+            /** Start Liquid */
+            start_liquid: number;
+            daily: components["schemas"]["PercentileBands"] | null;
+            /** Monthly */
+            monthly: components["schemas"]["MonthEndPoint"][] | null;
+            end_balance?: components["schemas"]["MonthEndPoint"] | null;
+            balance_12m?: components["schemas"]["MonthEndPoint"] | null;
+            low_point: components["schemas"]["LowPoint"];
+            overdraft_risk: components["schemas"]["Shortfall"];
+            cushion_risk: components["schemas"]["Shortfall"];
+            monthly_net: components["schemas"]["MonthlyNet"];
+            /** Drivers */
+            drivers: {
+                [key: string]: number;
+            };
+            /** Events */
+            events: components["schemas"]["ForecastEvent"][];
+            /** Assumptions */
+            assumptions: {
+                [key: string]: components["schemas"]["Assumption"];
+            };
+            backtest?: components["schemas"]["Backtest"] | null;
+            /** Calibration */
+            calibration?: string | null;
+        };
         /** LoginRequest */
         LoginRequest: {
             /** Email */
@@ -491,6 +726,18 @@ export interface components {
             customer_id: string;
             /** First Name */
             first_name: string;
+        };
+        /** LowPoint */
+        LowPoint: {
+            /**
+             * Day
+             * Format: date
+             */
+            day: string;
+            /** P50 */
+            p50: number;
+            /** P10 */
+            p10: number;
         };
         /** Me */
         Me: {
@@ -507,6 +754,29 @@ export interface components {
             /** As Of Date */
             as_of_date: string;
             summary: components["schemas"]["Summary"] | null;
+        };
+        /** MonthEndPoint */
+        MonthEndPoint: {
+            /** Month */
+            month: string;
+            /**
+             * Day
+             * Format: date
+             */
+            day: string;
+            /** P10 */
+            p10: number;
+            /** P50 */
+            p50: number;
+            /** P90 */
+            p90: number;
+        };
+        /** MonthEndProbability */
+        MonthEndProbability: {
+            /** Month */
+            month: string;
+            /** Probability */
+            probability: number;
         };
         /**
          * MonthPoint
@@ -532,6 +802,24 @@ export interface components {
             income: number;
             /** Expenses */
             expenses: number;
+        };
+        /** MonthlyNet */
+        MonthlyNet: {
+            /** Mean */
+            mean: number;
+            /** P10 */
+            p10: number;
+            /** P90 */
+            p90: number;
+        };
+        /** PercentileBands */
+        PercentileBands: {
+            /** P10 */
+            p10: number[];
+            /** P50 */
+            p50: number[];
+            /** P90 */
+            p90: number[];
         };
         /** Profile */
         Profile: {
@@ -674,6 +962,27 @@ export interface components {
             /** Residuals */
             residuals?: number[];
         };
+        /** RecurringItem */
+        RecurringItem: {
+            /** Name */
+            name: string;
+            /**
+             * Group
+             * @enum {string}
+             */
+            group: "income" | "bill" | "debt";
+            /** Amount */
+            amount: number;
+            /** Monthly Amount */
+            monthly_amount: number;
+            /** Cadence */
+            cadence: string;
+            /**
+             * Next Date
+             * Format: date
+             */
+            next_date: string;
+        };
         /** RetirementInfo */
         RetirementInfo: {
             /**
@@ -697,6 +1006,25 @@ export interface components {
              * @enum {string}
              */
             ira_type?: "roth" | "traditional" | "";
+        };
+        /** Shortfall */
+        Shortfall: {
+            /** Buffer */
+            buffer: number;
+            /** Probability */
+            probability: number;
+            /** Probability 90D */
+            probability_90d: number;
+            /** First Date P50 */
+            first_date_p50: string | null;
+            /** First Date P10 */
+            first_date_p10: string | null;
+            /** Share Of Days Below */
+            share_of_days_below: number;
+            /** Last Date Below P50 */
+            last_date_below_p50: string | null;
+            /** Month End Probability By Month */
+            month_end_probability_by_month: components["schemas"]["MonthEndProbability"][];
         };
         /**
          * SpendingProfile
@@ -765,6 +1093,18 @@ export interface components {
             buffer_ratio_median: number;
             /** Top Categories */
             top_categories?: components["schemas"]["CategoryShare"][];
+        };
+        /** Status */
+        Status: {
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "on_track" | "watch" | "at_risk";
+            /** Label */
+            label: string;
+            /** Note */
+            note: string;
         };
         /** Subscription */
         Subscription: {
@@ -962,201 +1302,6 @@ export interface components {
              * @default true
              */
             with_backtest?: boolean;
-        };
-        /** Assumption */
-        Assumption: {
-            /** Value */
-            value: number;
-            /** Source */
-            source: string;
-            /** As Of */
-            as_of: string;
-        };
-        /**
-         * Backtest
-         * @description Rebuilt from the first 18 months only, forecast the rest, compared with the actual daily balance.
-         */
-        Backtest: {
-            /**
-             * Cutoff
-             * Format: date
-             */
-            cutoff: string;
-            /** Days */
-            days: number;
-            /** Avg Monthly Outflow */
-            avg_monthly_outflow: number;
-            /** Outflow Err 30D */
-            outflow_err_30d: number | null;
-            /** Outflow Err 90D */
-            outflow_err_90d: number | null;
-            /** Outflow Err 180D */
-            outflow_err_180d: number | null;
-            /** Net Change Err 30D */
-            net_change_err_30d: number | null;
-            /** Net Change Err 90D */
-            net_change_err_90d: number | null;
-            /** Net Change Err 180D */
-            net_change_err_180d: number | null;
-            /** Mape 30D */
-            mape_30d: number | null;
-            /** Mape 90D */
-            mape_90d: number | null;
-            /** Mape 180D */
-            mape_180d: number | null;
-            /** Band Coverage */
-            band_coverage: number | null;
-            /**
-             * Band Coverage Month End
-             * @default null
-             */
-            band_coverage_month_end?: number | null;
-            /**
-             * Known One Off
-             * @default null
-             */
-            known_one_off?: string | null;
-        };
-        /** ForecastEvent */
-        ForecastEvent: {
-            /**
-             * Day
-             * Format: date
-             */
-            day: string;
-            /**
-             * Kind
-             * @enum {string}
-             */
-            kind: "raise" | "rent_renewal" | "loan_ends" | "cd_matures" | "lump_sum" | "income_change" | "extra_paycheck" | "double_payment";
-            /** Description */
-            description: string;
-            /**
-             * Monthly Impact
-             * @default null
-             */
-            monthly_impact?: number | null;
-            /**
-             * Assumed Timing
-             * @default false
-             */
-            assumed_timing?: boolean;
-        };
-        /** LowPoint */
-        LowPoint: {
-            /**
-             * Day
-             * Format: date
-             */
-            day: string;
-            /** P50 */
-            p50: number;
-            /** P10 */
-            p10: number;
-        };
-        /** MonthEndPoint */
-        MonthEndPoint: {
-            /** Month */
-            month: string;
-            /**
-             * Day
-             * Format: date
-             */
-            day: string;
-            /** P10 */
-            p10: number;
-            /** P50 */
-            p50: number;
-            /** P90 */
-            p90: number;
-        };
-        /** MonthEndProbability */
-        MonthEndProbability: {
-            /** Month */
-            month: string;
-            /** Probability */
-            probability: number;
-        };
-        /** MonthlyNet */
-        MonthlyNet: {
-            /** Mean */
-            mean: number;
-            /** P10 */
-            p10: number;
-            /** P90 */
-            p90: number;
-        };
-        /** PercentileBands */
-        PercentileBands: {
-            /** P10 */
-            p10: number[];
-            /** P50 */
-            p50: number[];
-            /** P90 */
-            p90: number[];
-        };
-        /** Shortfall */
-        Shortfall: {
-            /** Buffer */
-            buffer: number;
-            /** Probability */
-            probability: number;
-            /** Probability 90D */
-            probability_90d: number;
-            /** First Date P50 */
-            first_date_p50: string | null;
-            /** First Date P10 */
-            first_date_p10: string | null;
-            /** Share Of Days Below */
-            share_of_days_below: number;
-            /** Last Date Below P50 */
-            last_date_below_p50: string | null;
-            /** Month End Probability By Month */
-            month_end_probability_by_month: components["schemas"]["MonthEndProbability"][];
-        };
-        /** LiquidForecast */
-        LiquidForecast: {
-            /** Profile Id */
-            profile_id: string;
-            /**
-             * As Of Date
-             * Format: date
-             */
-            as_of_date: string;
-            /** Horizon Months */
-            horizon_months: number;
-            /** Paths */
-            paths: number;
-            /** Start Liquid */
-            start_liquid: number;
-            daily: components["schemas"]["PercentileBands"] | null;
-            /** Monthly */
-            monthly: components["schemas"]["MonthEndPoint"][] | null;
-            /** @default null */
-            end_balance?: components["schemas"]["MonthEndPoint"] | null;
-            /** @default null */
-            balance_12m?: components["schemas"]["MonthEndPoint"] | null;
-            low_point: components["schemas"]["LowPoint"];
-            overdraft_risk: components["schemas"]["Shortfall"];
-            cushion_risk: components["schemas"]["Shortfall"];
-            monthly_net: components["schemas"]["MonthlyNet"];
-            /** Drivers */
-            drivers: {
-                [key: string]: number;
-            };
-            /** Events */
-            events: components["schemas"]["ForecastEvent"][];
-            /** Assumptions */
-            assumptions: {
-                [key: string]: components["schemas"]["Assumption"];
-            };
-            /** @default null */
-            backtest?: components["schemas"]["Backtest"] | null;
-            /**
-             * Calibration
-             * @default null
-             */
-            calibration?: string | null;
         };
         /** NoArgs */
         NoArgs: Record<string, never>;
@@ -2270,6 +2415,123 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    my_profile_api_me_profile_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Profile"];
+                };
+            };
+        };
+    };
+    my_transactions_api_me_transactions_get: {
+        parameters: {
+            query?: {
+                category?: string | null;
+                flow_class?: string | null;
+                start?: string | null;
+                end?: string | null;
+                q?: string | null;
+                page?: number;
+                page_size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TransactionPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    my_forecast_api_me_forecast_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LiquidForecast"];
+                };
+            };
+        };
+    };
+    my_status_api_me_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Status"];
+                };
+            };
+        };
+    };
+    my_recurring_api_me_recurring_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecurringItem"][];
+                };
             };
         };
     };

@@ -24,3 +24,8 @@ export const dateLong = (iso: string) => longDay.format(parseDay(iso));
 export const dateShort = (iso: string) => shortDay.format(parseDay(iso));
 export const monthLabel = (ym: string) => `${monthShort.format(parseDay(`${ym}-01`))} ’${ym.slice(2, 4)}`;
 export const monthFull = (ym: string) => monthLong.format(parseDay(`${ym}-01`));
+/** Local date of a timestamp as YYYY-MM-DD (the inverse of parseDay; no timezone shift). */
+export const isoOf = (ms: number) => {
+  const d = new Date(ms);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
