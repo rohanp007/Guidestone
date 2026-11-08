@@ -60,6 +60,7 @@ class Scenario(Base):
     expense_change: ExpenseChange | None = None
     add_loan: AddLoan | None = None
     lump_sum: float | None = Field(None, ge=0, description="One-time payment toward debt from cash at month 0 (with a payoff_strategy: None = safe lump sum)")
+    purchase_now: float | None = Field(None, ge=0, description="One-time spending from cash at month 0 (a car bought with cash, or a down payment)")
     payoff_strategy: str | None = Field(None, description="A avalanche, B snowball, C lump sum, D lump then avalanche, E minimums only, F custom")
 
     @field_validator("payoff_strategy")
@@ -117,6 +118,8 @@ def to_changes(profile: Profile, scenario: Scenario, schedule: Amortization | No
     if ec is not None and ec.monthly_delta:
         for k in range(ec.start_month, min(ec.end_month or horizon_months, horizon_months) + 1):
             flows.append(fc.Flow(fc.add_months(as_of, k), -ec.monthly_delta, "Spending change", "expense_change"))
+    if scenario.purchase_now:
+        flows.append(fc.Flow(as_of + timedelta(days=1), -scenario.purchase_now, "Purchase paid from cash", "purchase"))
     loan = scenario.add_loan
     if loan is not None:
         first = fc.add_months(as_of, loan.start_month) if loan.start_month else as_of + timedelta(days=1)
@@ -251,11 +254,12 @@ def _summary(r: SimulationResult) -> SimulationSummary:
 
 @register("simulate_scenario", args=Scenario, result=SimulationResult, category="simulate")
 def simulate_scenario(profile: Profile, *, extra_monthly: float | None = None, expense_change: ExpenseChange | None = None,
-                      add_loan: AddLoan | None = None, lump_sum: float | None = None, payoff_strategy: str | None = None) -> SimulationResult:
+                      add_loan: AddLoan | None = None, lump_sum: float | None = None, purchase_now: float | None = None,
+                      payoff_strategy: str | None = None) -> SimulationResult:
     """Runs the liquid-cash forecast with a what-if (spending change, new loan, lump sum or extra money toward debt, payoff strategy)
     and without it, on the same random draws, and returns both with their difference. Full result, with month-end bands."""
     return simulate(profile, Scenario(extra_monthly=extra_monthly, expense_change=expense_change, add_loan=add_loan, lump_sum=lump_sum,
-                                      payoff_strategy=payoff_strategy))
+                                      purchase_now=purchase_now, payoff_strategy=payoff_strategy))
 
 
 @register("simulate_scenario_summary", args=Scenario, result=SimulationSummary, category="simulate")

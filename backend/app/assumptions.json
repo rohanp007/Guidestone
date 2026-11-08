@@ -188,5 +188,15 @@
     "value": 0.02,
     "source": "Design choice, the percentage half of cushion_warn_min_shortfall: 2% of the cushion target.",
     "as_of": "2026-11-08"
+  },
+  "car_loan_term_months": {
+    "value": 60,
+    "source": "Modelling choice for the Buy plans: a 60-month auto loan. Bankrate and Experian report 60-72 month terms as the common range; the rates in research/cars.json are not term-specific.",
+    "as_of": "2026-11-08"
+  },
+  "car_payment_max_share_of_gross": {
+    "value": 0.1,
+    "source": "Product rule for the Buy verdict: a monthly car payment at or under 10% of gross monthly income counts as affordable.",
+    "as_of": "2026-11-08"
   }
 }

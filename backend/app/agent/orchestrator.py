@@ -26,10 +26,11 @@ from ..llm import client, grounding
 from ..llm.facts import forecast_facts, model_view, placeholders
 from ..llm.prompts import EXPLAIN_PROMPT
 from ..llm.tools import Tool, session_tool
-from . import advisor, cache, payoff_advisor
+from . import advisor, buy_advisor, cache, payoff_advisor, researcher
 from .events import EventSpec, get_event
 from . import stream as stream_mod
-from .models import MAX_STEPS, Advice, AnalysisResult, PayoffAnalysis, GroundingSummary, HeadlineSummary, Plan, PlanStep, TraceStep
+from ..research.sanitize import sanitize
+from .models import MAX_STEPS, Advice, AnalysisResult, BuyAnalysis, PayoffAnalysis, GroundingSummary, HeadlineSummary, Plan, PlanStep, TraceStep
 from .prompts import ORCH_PLAN_V1, PROMPT_VERSION, TOOL_HINTS
 
 log = logging.getLogger("guidestone.agent")
@@ -58,6 +59,8 @@ class _State:
     rules: advisor.Inputs | None = None                  # the decision rules' output (waterfall, candidate moves, verdict)
     advice: Advice | None = None
     payoff: PayoffAnalysis | None = None
+    buy: BuyAnalysis | None = None
+    buy_parts: tuple | None = None                       # (plans, facts) once known, so a timeout can still answer from them
     pf: payoff_advisor.PayoffFacts | None = None         # the payoff event's figures, once known (a timeout can still answer from them)
     pf_parts: tuple | None = None                        # (summary, chosen strategy, verdict, simulation)
     degraded: bool = False
@@ -326,19 +329,57 @@ async def _pipeline_payoff(st: _State) -> None:
     st.payoff = _payoff_analysis(st, summary, chosen, verdict, simulation, ans)
 
 
+# ---- the buy event -------------------------------------------------------------------------------------------------------------
+
+async def _pipeline_buy(st: _State) -> None:
+    """Researcher (sanitized query only) -> buy_plans for the chosen car -> the advisor's answer. No eligible car: a clear error."""
+    st.llm_trace = client.start_run()
+    query = sanitize(st.inputs)                                    # the only thing the Researcher is told
+    _say(st, "researcher", "start", stream_mod.LABELS["research"][0])
+    t0 = time.perf_counter()
+    found = await researcher.research(query)
+    st.trace.append(TraceStep(kind="research", name="researcher", ms=round((time.perf_counter() - t0) * 1000, 1),
+                              detail={"source": found.source, "retried": found.retried, "picks": len(found.picks), "reasons": ",".join(found.reasons)[:39]}))
+    if found.source != "model":
+        st.degraded = True
+    choice = st.inputs.get("choice_id") or (found.picks[0].id if found.picks else None)
+    if choice is None:
+        raise ValueError("no car in the research pack fits that segment and budget")
+    tool = session_tool(st.profile, "buy_plans")
+    _say(st, "compute", "start", stream_mod.LABELS["buyplans"][0])
+    plans, ok = await _timed(st, "tool", "buy_plans", tool.arun({"vehicle_id": choice}))
+    if not ok:
+        raise plans
+    st.compute["buy_plans"] = to_plain(plans)
+    pf = buy_advisor.facts_for(plans)
+    st.facts = dict(pf.values)
+    st.buy_parts = (plans, pf, found, query, choice)
+    t0 = time.perf_counter()
+    _say(st, "advisor", "start", stream_mod.LABELS["answer"][0])
+    ans = await buy_advisor.answer(plans, pf)
+    st.trace.append(TraceStep(kind="advise", name="advisor", ms=round((time.perf_counter() - t0) * 1000, 1),
+                              detail={"source": ans.source, "retried": ans.diagnostics.retried, "first_try_ok": ans.diagnostics.first_try_ok,
+                                      "reasons": ",".join(ans.diagnostics.final_reasons or ans.diagnostics.first_reasons)[:39]}))
+    if ans.source != "model":
+        st.degraded = True
+    st.buy = BuyAnalysis(verdict=plans.verdict, query=query, picks=found.picks, research_source=found.source, choice_id=choice, plans=plans, answer=ans)  # type: ignore[arg-type]
+
+
 # ---- the run -------------------------------------------------------------------------------------------------------------------
 
 def _assemble(st: _State, data_version: str) -> AnalysisResult:
     return AnalysisResult(
         run_id=st.run_id, event=st.spec.name, feature=st.spec.feature, customer_id=st.profile.id, as_of=st.profile.as_of_date.isoformat(),
         prompt_version=PROMPT_VERSION, data_version=data_version, inputs=st.inputs, compute=st.compute, facts=st.facts or {},
-        status=st.payoff.verdict if st.payoff else (st.facts or {}).get("overall_status"), summary=st.summary, advice=st.advice,
-        payoff=st.payoff, trace=st.trace, llm_trace=st.llm_trace, degraded=st.degraded)
+        status=st.payoff.verdict if st.payoff else st.buy.verdict if st.buy else (st.facts or {}).get("overall_status"), summary=st.summary, advice=st.advice,
+        payoff=st.payoff, buy=st.buy, trace=st.trace, llm_trace=st.llm_trace, degraded=st.degraded)
 
 
 async def _pipeline(st: _State) -> None:
     if st.spec.pipeline == "payoff":
         return await _pipeline_payoff(st)
+    if st.spec.pipeline == "buy":
+        return await _pipeline_buy(st)
     st.llm_trace = client.start_run()
     await precompute(st)
     st.facts = build_facts(st)
@@ -363,6 +404,15 @@ async def _execute(st: _State, data_version: str) -> AnalysisResult:
         async with asyncio.timeout(RUN_TIMEOUT_S):
             await _pipeline(st)
     except TimeoutError:
+        if st.spec.pipeline == "buy":
+            if st.buy_parts is None:
+                raise
+            plans, pf, found, query, choice = st.buy_parts
+            st.degraded = True
+            st.trace.append(TraceStep(kind="fallback", name="timeout", ok=False, detail={"limit_s": RUN_TIMEOUT_S}))
+            ans = buy_advisor._template_answer(plans, pf, "run_timeout", buy_advisor._Tally())
+            st.buy = BuyAnalysis(verdict=plans.verdict, query=query, picks=found.picks, research_source=found.source, choice_id=choice, plans=plans, answer=ans)
+            return _assemble(st, data_version)
         if st.spec.pipeline == "payoff":
             if st.pf_parts is None:             # no figures yet: nothing to show
                 raise

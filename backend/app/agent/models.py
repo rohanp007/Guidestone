@@ -6,7 +6,9 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from ..engine.simulate import PayoffSimulation
+from ..formulas.buy import BuyPlans
 from ..formulas.payoff import Recommendation, StrategySummary
+from ..research.sanitize import BuyQuery
 
 MAX_STEPS = 4
 REASON_MAX = 80
@@ -28,7 +30,7 @@ class Plan(BaseModel):
     steps: list[PlanStep] = Field(default_factory=list)
 
 
-TraceKind = Literal["precompute", "plan", "plan_rejected", "tool", "rules", "explain", "advise", "fallback", "cache_hit"]
+TraceKind = Literal["precompute", "plan", "plan_rejected", "tool", "rules", "explain", "advise", "research", "fallback", "cache_hit"]
 
 
 class TraceStep(BaseModel):
@@ -117,6 +119,35 @@ class PayoffAnalysis(BaseModel):
     answer: PayoffAnswer
 
 
+class SourceLine(BaseModel):
+    figure: str                              # msrp, mpg_combined, nhtsa_stars, iihs_award
+    source_title: str
+    fetched_at: str
+    url: str
+
+
+class ResearchPick(BaseModel):
+    id: str
+    name: str
+    why_text: str                            # words from the Researcher (or the code template), figures from the pack
+    source: Literal["model", "template"]
+    sources: list[SourceLine]                # the UI source line: title + date, with the url as a link
+
+
+BuyVerdict = Literal["affordable", "stretch", "not_now"]
+
+
+class BuyAnalysis(BaseModel):
+    """The simulate_buy event's result: the cars the Researcher picked, three ways to pay for the chosen one, and the answer."""
+    verdict: BuyVerdict                      # set by code
+    query: BuyQuery                          # what the Researcher was told (and all it was told)
+    picks: list[ResearchPick]
+    research_source: Literal["model", "template"]
+    choice_id: str
+    plans: BuyPlans
+    answer: PayoffAnswer
+
+
 class AnalysisResult(BaseModel):
     run_id: str
     event: str
@@ -133,6 +164,7 @@ class AnalysisResult(BaseModel):
     research: list[Any] = Field(default_factory=list)       # empty in v1
     advice: Advice | None = None
     payoff: PayoffAnalysis | None = None                     # the simulate_payoff event
+    buy: BuyAnalysis | None = None                           # the simulate_buy event
     trace: list[TraceStep]
     llm_trace: list[dict[str, Any]]          # the LLM client's per-run trace
     degraded: bool = False                   # a fallback was used somewhere

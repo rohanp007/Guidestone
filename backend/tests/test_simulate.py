@@ -74,7 +74,7 @@ def test_scenario_is_strict():
         sm.Scenario(expense_change={"monthly_delta": 5, "start_month": 4, "end_month": 2})
     with pytest.raises(ValidationError):
         sm.Scenario(add_loan={"principal": 1000, "apr": 0.05, "term_months": 12, "extra": 1})
-    assert sm.Scenario().model_dump() == {"extra_monthly": None, "expense_change": None, "add_loan": None, "lump_sum": None, "payoff_strategy": None}
+    assert sm.Scenario().model_dump() == {"extra_monthly": None, "expense_change": None, "add_loan": None, "lump_sum": None, "purchase_now": None, "payoff_strategy": None}
 
 
 # ---- paired runs -----------------------------------------------------------------------------------------------------------------

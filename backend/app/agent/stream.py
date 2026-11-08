@@ -64,6 +64,8 @@ LABELS = {
     "slow": "This is taking longer than expected; showing what is ready",
     "failed": "The check-up could not be completed",
     "superseded": "A newer check-up replaced this one",
+    "research": ("Choosing cars to compare", "Cars chosen"),
+    "buyplans": ("Comparing 3 ways to pay", "Ways to pay compared"),
     "other_calc": "Running a calculation",
 }
 FORMULA_LABELS = {
@@ -72,6 +74,7 @@ FORMULA_LABELS = {
     "job_loss_stress": "Testing what a job loss would do",
     "payoff_strategies_summary": LABELS["compare"][1],
     "simulate_payoff": LABELS["simulate"][1],
+    "buy_plans": LABELS["buyplans"][1],
 }
 LABEL_TEXTS = {t for v in LABELS.values() for t in ((v,) if isinstance(v, str) else v)} | set(FORMULA_LABELS.values())
 
@@ -110,6 +113,14 @@ def progress_for(step: TraceStep) -> list[tuple[Agent, Phase, str, dict[str, Any
         outcome = "template" if template else "retried" if d.get("retried") else "passed"
         done = LABELS["answer"][1] if "moves" not in d else LABELS["advice"][1]
         return out + [("advisor", "done", done, {"outcome": outcome, **ms})]
+    if kind == "research":
+        out = []
+        if d.get("retried"):
+            out.append(("researcher", "step", LABELS["retry"], {}))
+        if d.get("source") == "template":
+            out.append(("researcher", "step", LABELS["standard"], {"outcome": "template"}))
+        outcome = "template" if d.get("source") == "template" else "retried" if d.get("retried") else "passed"
+        return out + [("researcher", "done", LABELS["research"][1], {"check": "grounding", "outcome": outcome, **ms})]
     if kind == "fallback" and step.name in ("explain", "advise"):
         agent: Agent = "presenter" if step.name == "explain" else "advisor"
         return [(agent, "done", LABELS["standard"], {"outcome": "template", **ms})]

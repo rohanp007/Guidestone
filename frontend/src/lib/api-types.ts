@@ -525,6 +525,7 @@ export interface components {
             research?: unknown[];
             advice?: components["schemas"]["Advice"] | null;
             payoff?: components["schemas"]["PayoffAnalysis"] | null;
+            buy?: components["schemas"]["BuyAnalysis"] | null;
             /** Trace */
             trace: components["schemas"]["TraceStep"][];
             /** Llm Trace */
@@ -611,6 +612,133 @@ export interface components {
             completion_tokens: number;
             /** Max Tokens */
             max_tokens: number | null;
+        };
+        /**
+         * BuyAnalysis
+         * @description The simulate_buy event's result: the cars the Researcher picked, three ways to pay for the chosen one, and the answer.
+         */
+        BuyAnalysis: {
+            /**
+             * Verdict
+             * @enum {string}
+             */
+            verdict: "affordable" | "stretch" | "not_now";
+            query: components["schemas"]["BuyQuery"];
+            /** Picks */
+            picks: components["schemas"]["ResearchPick"][];
+            /**
+             * Research Source
+             * @enum {string}
+             */
+            research_source: "model" | "template";
+            /** Choice Id */
+            choice_id: string;
+            plans: components["schemas"]["BuyPlans"];
+            answer: components["schemas"]["PayoffAnswer"];
+        };
+        /** BuyPlan */
+        BuyPlan: {
+            /**
+             * Code
+             * @enum {string}
+             */
+            code: "cash" | "finance" | "mix";
+            /** Name */
+            name: string;
+            /** Down Payment */
+            down_payment: number;
+            /** Loan Amount */
+            loan_amount: number;
+            /** Monthly Payment */
+            monthly_payment: number;
+            /** Term Months */
+            term_months: number;
+            /** Total Interest */
+            total_interest: number;
+            /** Total Cost */
+            total_cost: number;
+            /** Cash After */
+            cash_after: number;
+            /** Payment Share Of Gross */
+            payment_share_of_gross: number;
+            /** Payment Ok */
+            payment_ok: boolean;
+            /** Cushion Floor */
+            cushion_floor: number;
+            cushion: components["schemas"]["SimSummary"];
+            /** Cushion Shortfall */
+            cushion_shortfall: number;
+            /** Cushion Holds */
+            cushion_holds: boolean;
+            /**
+             * Same As Cash
+             * @default false
+             */
+            same_as_cash?: boolean;
+        };
+        /** BuyPlans */
+        BuyPlans: {
+            /** Profile Id */
+            profile_id: string;
+            /** Vehicle Id */
+            vehicle_id: string;
+            /** Vehicle Name */
+            vehicle_name: string;
+            /** Price */
+            price: number;
+            /**
+             * Price Includes
+             * @default starting MSRP: before tax, destination and fees
+             */
+            price_includes?: string;
+            /** Credit Tier */
+            credit_tier: string;
+            /** Loan Apr */
+            loan_apr: number;
+            /** Savings Rate */
+            savings_rate: number;
+            /** Safe Lump Sum */
+            safe_lump_sum: number;
+            /** Gross Monthly */
+            gross_monthly: number;
+            /** Plans */
+            plans: {
+                [key: string]: components["schemas"]["BuyPlan"];
+            };
+            /**
+             * Recommended
+             * @enum {string}
+             */
+            recommended: "cash" | "finance" | "mix";
+            /**
+             * Recommended Reason
+             * @enum {string}
+             */
+            recommended_reason: "loan_cheaper_than_savings" | "cash_keeps_cushion" | "cash_would_break_cushion" | "no_safe_cash";
+            /**
+             * Verdict
+             * @enum {string}
+             */
+            verdict: "affordable" | "stretch" | "not_now";
+            /** Payment Ok */
+            payment_ok: boolean;
+            /** Cushion Holds */
+            cushion_holds: boolean;
+        };
+        /** BuyQuery */
+        BuyQuery: {
+            /**
+             * Segment
+             * @enum {string}
+             */
+            segment: "compact_suv" | "midsize_sedan";
+            /** Budget Band */
+            budget_band?: number | null;
+            /**
+             * Priorities
+             * @default []
+             */
+            priorities?: ("price" | "mpg" | "safety")[];
         };
         /** CategoryShare */
         CategoryShare: {
@@ -1145,6 +1273,22 @@ export interface components {
              */
             next_date: string;
         };
+        /** ResearchPick */
+        ResearchPick: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Why Text */
+            why_text: string;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "model" | "template";
+            /** Sources */
+            sources: components["schemas"]["SourceLine"][];
+        };
         /** RetirementInfo */
         RetirementInfo: {
             /**
@@ -1262,6 +1406,17 @@ export interface components {
             plan?: components["schemas"]["StrategyResult"] | null;
             /** Warnings */
             warnings?: components["schemas"]["PayoffWarning"][];
+        };
+        /** SourceLine */
+        SourceLine: {
+            /** Figure */
+            figure: string;
+            /** Source Title */
+            source_title: string;
+            /** Fetched At */
+            fetched_at: string;
+            /** Url */
+            url: string;
         };
         /**
          * SpendingProfile
@@ -1493,7 +1648,7 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "precompute" | "plan" | "plan_rejected" | "tool" | "rules" | "explain" | "advise" | "fallback" | "cache_hit";
+            kind: "precompute" | "plan" | "plan_rejected" | "tool" | "rules" | "explain" | "advise" | "research" | "fallback" | "cache_hit";
             /** Name */
             name: string;
             /**
@@ -2140,6 +2295,12 @@ export interface components {
              */
             lump_sum?: number | null;
             /**
+             * Purchase Now
+             * @description One-time spending from cash at month 0 (a car bought with cash, or a down payment)
+             * @default null
+             */
+            purchase_now?: number | null;
+            /**
              * Payoff Strategy
              * @description A avalanche, B snowball, C lump sum, D lump then avalanche, E minimums only, F custom
              * @default null
@@ -2202,6 +2363,15 @@ export interface components {
             no_debt: boolean;
             strategy: components["schemas"]["StrategySummary"] | null;
             simulation: components["schemas"]["SimulationSummary"] | null;
+        };
+        /** BuyPlansArgs */
+        BuyPlansArgs: {
+            /**
+             * Vehicle Id
+             * @description A vehicle id from the research pack, e.g. honda_crv; omit for the cheapest car with a cited price
+             * @default null
+             */
+            vehicle_id?: string | null;
         };
     };
     responses: never;
