@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
 from .. import config
+from ..auth import current_user
 from ..data import loader
 from ..formulas import forecast
 from .schemas import AssumptionsResponse, Health
@@ -16,7 +17,7 @@ def health() -> Health:
                   data_hash=loader.cache_key()[:12])
 
 
-@router.get("/assumptions", response_model=AssumptionsResponse)
+@router.get("/assumptions", response_model=AssumptionsResponse, dependencies=[Depends(current_user)])
 def assumptions() -> AssumptionsResponse:
     """For the "Assumptions we used" panel: every forecast assumption with its source, and how the bands were calibrated."""
     cal = forecast._calibration()

@@ -4,12 +4,13 @@ from datetime import date, timedelta
 from functools import lru_cache
 
 import pandas as pd
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from .. import config
 from ..data.loader import load_profiles, transactions_for
 from ..data.models import Profile
 from ..formulas.health import paycheck_to_paycheck
+from ..auth import User, current_user
 from .deps import get_profile
 from .schemas import ProfileListItem, Transaction, TransactionPage
 from .serialize import to_plain
@@ -34,8 +35,11 @@ def _flags(p: Profile) -> list[str]:
 
 
 @router.get("", response_model=list[ProfileListItem])
-def list_profiles() -> list[ProfileListItem]:
-    """Feeds the persona switcher. Featured personas come first (in the order configured), then everyone by id."""
+def list_profiles(user: User = Depends(current_user)) -> list[ProfileListItem]:
+    """Every customer's summary, for the demo's persona list. Featured personas come first, then everyone by id.
+    Demo mode only: in production no one can list other customers."""
+    if not config.auth_settings().demo_mode:
+        raise HTTPException(status_code=403, detail="forbidden")
     featured = {cid: i for i, cid in enumerate(config.FEATURED_PERSONAS)}
     items = [ProfileListItem(id=p.id, age=p.age, employment=p.employment, housing=p.housing, credit_tier=p.credit_tier,
                              net_worth=p.summary.net_worth, monthly_surplus=p.summary.monthly_surplus, flags=_flags(p))

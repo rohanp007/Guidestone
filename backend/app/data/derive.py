@@ -179,7 +179,7 @@ def _history(profile: Profile, tx: pd.DataFrame, statements: pd.DataFrame) -> li
         key = month.strftime("%Y-%m")
         assets = float(row["liquid"] + row["asset"]) + est
         out.append(MonthPoint(month=key, liquid=float(row["liquid"]), total_assets=assets, total_debt=float(row["debt"]),
-                              net_worth=assets - float(row["debt"]), income=float(income.get(key, 0.0)),
+                              net_worth=assets - float(row["debt"]), estimated_assets=float(est), income=float(income.get(key, 0.0)),
                               expenses=float(expenses.get(key, 0.0))))
     return out
 

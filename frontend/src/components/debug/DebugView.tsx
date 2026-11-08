@@ -41,11 +41,11 @@ export default function DebugView({ id }: { id: string }) {
   const held = (assump?.calibration_details as { held_out?: Record<string, number>; nominal?: number; backtest_error?: Record<string, { median: number; p75: number; p90: number; customers: number }> } | null | undefined);
 
   return (
-    <main className="max-w-6xl mx-auto p-4 text-gray-900 dark:text-gray-100">
+    <main className="max-w-6xl mx-auto p-4 text-gray-900">
       <header className="flex items-center gap-3 mb-4">
         <h1 className="text-xl font-bold">Debug</h1>
         <select className="border px-2 py-1 bg-white text-gray-900" value={id} onChange={(e) => router.push(`/debug/${e.target.value}`)}>
-          {list.map((p) => (
+          {list.filter((p) => p.id === id).map((p) => (    // other customers would be 403: you only see your own
             <option key={p.id} value={p.id}>
               {p.id} · {p.age} · {p.employment} · {p.housing}{p.flags.length ? ` · ${p.flags.join(",")}` : ""}
             </option>

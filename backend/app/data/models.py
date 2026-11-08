@@ -102,6 +102,7 @@ class MonthPoint(Base):
     total_assets: float
     total_debt: float
     net_worth: float
+    estimated_assets: float = 0.0          # home + vehicle estimates included in total_assets (no statements behind them)
     income: float                          # flow_class == income
     expenses: float                        # flow_class == expense
 
