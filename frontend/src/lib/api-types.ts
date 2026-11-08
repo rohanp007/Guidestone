@@ -1428,6 +1428,517 @@ export interface components {
                 };
             };
         };
+        /** PayoffStrategiesArgs */
+        PayoffStrategiesArgs: {
+            /**
+             * Extra Monthly
+             * @description Extra per month on top of minimums; omit to use the monthly surplus, 0 means none
+             * @default null
+             */
+            extra_monthly?: number | null;
+            /**
+             * Lump Sum
+             * @description One-time payment from cash at month 0; omit to use the safe lump sum, 0 means none
+             * @default null
+             */
+            lump_sum?: number | null;
+            /**
+             * Include Mortgage
+             * @description Count the mortgage as a debt to pay down
+             * @default false
+             */
+            include_mortgage?: boolean;
+        };
+        /** Amortization */
+        Amortization: {
+            /** Months To Payoff */
+            months_to_payoff: number | null;
+            /** Payoff Date */
+            payoff_date: string | null;
+            /** Total Interest */
+            total_interest: number;
+            /** Total Paid */
+            total_paid: number;
+            /** Never Pays Off */
+            never_pays_off: boolean;
+            /** Hit Max Months */
+            hit_max_months: boolean;
+            /** Max Months */
+            max_months: number;
+            /** Extra Monthly */
+            extra_monthly: number;
+            /** Lump Sum */
+            lump_sum: number;
+            /** Lump Applied */
+            lump_applied: number;
+            /** Rollover */
+            rollover: boolean;
+            /** Order */
+            order: string[];
+            /** Lump Order */
+            lump_order: string[];
+            /** Per Debt */
+            per_debt: {
+                [key: string]: components["schemas"]["DebtPayoff"];
+            };
+            /** Schedule */
+            schedule: components["schemas"]["ScheduleRow"][];
+        };
+        /** ComparisonRow */
+        ComparisonRow: {
+            /** Code */
+            code: string;
+            /** Name */
+            name: string;
+            /** Months */
+            months: number | null;
+            /** Total Interest */
+            total_interest: number;
+            /** Interest Saved */
+            interest_saved: number;
+            /** Cushion Min P10 */
+            cushion_min_p10: number | null;
+            /** Months P10 Below Cushion */
+            months_p10_below_cushion: number | null;
+        };
+        /** CushionImpact */
+        CushionImpact: {
+            /** Cushion */
+            cushion: number;
+            /** Horizon Months */
+            horizon_months: number;
+            /** Paths */
+            paths: number;
+            baseline: components["schemas"]["SimSummary"];
+            scenario: components["schemas"]["SimSummary"];
+            diff: components["schemas"]["SimDiff"];
+        };
+        /** Debt */
+        Debt: {
+            /** Id */
+            id: string;
+            /**
+             * Type
+             * @default personal_loan
+             */
+            type?: string;
+            /**
+             * Kind
+             * @default loan
+             * @enum {string}
+             */
+            kind?: "card" | "loan";
+            /** Apr */
+            apr: number;
+            /** Balance */
+            balance: number;
+            /**
+             * Fixed Min
+             * @default null
+             */
+            fixed_min?: number | null;
+            /**
+             * Card Min Pct
+             * @default null
+             */
+            card_min_pct?: number | null;
+            /**
+             * Card Min Floor
+             * @default null
+             */
+            card_min_floor?: number | null;
+            /**
+             * Min Source
+             * @default given
+             */
+            min_source?: string;
+            /**
+             * Term Months Remaining
+             * @default null
+             */
+            term_months_remaining?: number | null;
+        };
+        /** DebtPayoff */
+        DebtPayoff: {
+            /** Payoff Month */
+            payoff_month: number | null;
+            /** Payoff Date */
+            payoff_date: string | null;
+            /** Interest */
+            interest: number;
+            /** Paid */
+            paid: number;
+            /**
+             * Never Pays Off
+             * @default false
+             */
+            never_pays_off?: boolean;
+        };
+        /** PayoffWarning */
+        PayoffWarning: {
+            /** Code */
+            code: string;
+            /**
+             * Amount
+             * @default null
+             */
+            amount?: number | null;
+            /**
+             * Limit
+             * @default null
+             */
+            limit?: number | null;
+            /**
+             * Unused Amount
+             * @default null
+             */
+            unused_amount?: number | null;
+            /** Accounts */
+            accounts?: string[];
+            /**
+             * Detail
+             * @default
+             */
+            detail?: string;
+        };
+        /** Recommendation */
+        Recommendation: {
+            /** Code */
+            code: string | null;
+            /** Reason Code */
+            reason_code: string;
+            /**
+             * Name
+             * @default null
+             */
+            name?: string | null;
+        };
+        /** ScheduleRow */
+        ScheduleRow: {
+            /** Month */
+            month: number;
+            /**
+             * Date
+             * Format: date
+             */
+            date: string;
+            /** Payments */
+            payments: {
+                [key: string]: number;
+            };
+            /** Interest */
+            interest: {
+                [key: string]: number;
+            };
+            /** Balances */
+            balances: {
+                [key: string]: number;
+            };
+            /** Total Payment */
+            total_payment: number;
+        };
+        /** SimDiff */
+        SimDiff: {
+            /** End P50 */
+            end_p50: number;
+            /** Min P10 */
+            min_p10: number;
+            /** Overdraft Prob */
+            overdraft_prob: number;
+            /** Cushion Prob */
+            cushion_prob: number;
+            /** Months P10 Below Cushion */
+            months_p10_below_cushion: number;
+        };
+        /** SimSummary */
+        SimSummary: {
+            /** End P50 */
+            end_p50: number;
+            /** Min P10 */
+            min_p10: number;
+            /** Overdraft Prob */
+            overdraft_prob: number;
+            /** Cushion Prob */
+            cushion_prob: number;
+            /** Months P10 Below Cushion */
+            months_p10_below_cushion: number;
+        };
+        /** StrategyResult */
+        StrategyResult: {
+            /** Code */
+            code: string;
+            /** Name */
+            name: string;
+            /** Order */
+            order: string[];
+            /** Extra Monthly */
+            extra_monthly: number;
+            /** Lump Sum */
+            lump_sum: number;
+            /** Lump Applied */
+            lump_applied: number;
+            /** Safe Lump Sum */
+            safe_lump_sum: number;
+            amortization: components["schemas"]["Amortization"];
+            /** Interest Saved Vs Minimum */
+            interest_saved_vs_minimum: number;
+            /** Months Saved Vs Minimum */
+            months_saved_vs_minimum: number | null;
+            /**
+             * Snowball Extra Cost
+             * @default null
+             */
+            snowball_extra_cost?: number | null;
+            /** @default null */
+            cushion_impact?: components["schemas"]["CushionImpact"] | null;
+            /** Warnings */
+            warnings?: components["schemas"]["PayoffWarning"][];
+        };
+        /** PayoffStrategies */
+        PayoffStrategies: {
+            /** Profile Id */
+            profile_id: string;
+            /** No Debt */
+            no_debt: boolean;
+            /** No Surplus */
+            no_surplus: boolean;
+            /** Flags */
+            flags: string[];
+            /** Include Mortgage */
+            include_mortgage: boolean;
+            /** Excluded Mortgages */
+            excluded_mortgages: string[];
+            /** Debts */
+            debts: components["schemas"]["Debt"][];
+            /** Extra Monthly */
+            extra_monthly: number;
+            /** Safe Lump Sum */
+            safe_lump_sum: number;
+            /** Lump Sum */
+            lump_sum: number;
+            /** Strategies */
+            strategies: {
+                [key: string]: components["schemas"]["StrategyResult"];
+            };
+            /** Comparison */
+            comparison: components["schemas"]["ComparisonRow"][];
+            recommended: components["schemas"]["Recommendation"] | null;
+            /** Snowball Extra Cost */
+            snowball_extra_cost: number | null;
+            /** Cushion */
+            cushion: number | null;
+            /** Paths */
+            paths: number | null;
+            /** Runtime Ms */
+            runtime_ms: number;
+        };
+        /** StrategySummary */
+        StrategySummary: {
+            /** Code */
+            code: string;
+            /** Name */
+            name: string;
+            /** Months */
+            months: number | null;
+            /** Payoff Date */
+            payoff_date: string | null;
+            /** Total Interest */
+            total_interest: number;
+            /** Interest Saved */
+            interest_saved: number;
+            /** Months Saved */
+            months_saved: number | null;
+            /** Cushion Min P10 */
+            cushion_min_p10: number | null;
+            /** Cushion Min P10 Diff */
+            cushion_min_p10_diff: number | null;
+            /** Months P10 Below Cushion */
+            months_p10_below_cushion: number | null;
+            /** Months P10 Below Cushion Diff */
+            months_p10_below_cushion_diff: number | null;
+            /** Warnings */
+            warnings: components["schemas"]["PayoffWarning"][];
+        };
+        /** PayoffStrategiesSummary */
+        PayoffStrategiesSummary: {
+            /** Profile Id */
+            profile_id: string;
+            /** No Debt */
+            no_debt: boolean;
+            /** No Surplus */
+            no_surplus: boolean;
+            /** Extra Monthly */
+            extra_monthly: number;
+            /** Lump Sum */
+            lump_sum: number;
+            /** Safe Lump Sum */
+            safe_lump_sum: number;
+            recommended: components["schemas"]["Recommendation"] | null;
+            /** Snowball Extra Cost */
+            snowball_extra_cost: number | null;
+            /** Strategies */
+            strategies: components["schemas"]["StrategySummary"][];
+            /** Cushion */
+            cushion: number | null;
+        };
+        /** AddLoan */
+        AddLoan: {
+            /** Principal */
+            principal: number;
+            /**
+             * Apr
+             * @description Decimal: 0.07 = 7%
+             */
+            apr: number;
+            /** Term Months */
+            term_months: number;
+            /**
+             * Start Month
+             * @description Month the loan starts (0 = tomorrow); the first payment is a month later
+             * @default 1
+             */
+            start_month?: number;
+            /**
+             * Disbursed To Cash
+             * @description True: the principal lands in checking. False: it is spent elsewhere (a car, a house)
+             * @default true
+             */
+            disbursed_to_cash?: boolean;
+        };
+        /** ExpenseChange */
+        ExpenseChange: {
+            /**
+             * Monthly Delta
+             * @description Change in monthly spending: positive spends more, negative spends less
+             */
+            monthly_delta: number;
+            /**
+             * Start Month
+             * @description First month it applies (1 = the month after today)
+             * @default 1
+             */
+            start_month?: number;
+            /**
+             * End Month
+             * @description Last month it applies; omit for the whole horizon
+             * @default null
+             */
+            end_month?: number | null;
+        };
+        /** Scenario */
+        Scenario: {
+            /**
+             * Extra Monthly
+             * @description Extra per month toward debt (with a payoff_strategy: None = the surplus)
+             * @default null
+             */
+            extra_monthly?: number | null;
+            /** @default null */
+            expense_change?: components["schemas"]["ExpenseChange"] | null;
+            /** @default null */
+            add_loan?: components["schemas"]["AddLoan"] | null;
+            /**
+             * Lump Sum
+             * @description One-time payment toward debt from cash at month 0 (with a payoff_strategy: None = safe lump sum)
+             * @default null
+             */
+            lump_sum?: number | null;
+            /**
+             * Payoff Strategy
+             * @description A avalanche, B snowball, C lump sum, D lump then avalanche, E minimums only, F custom
+             * @default null
+             */
+            payoff_strategy?: string | null;
+        };
+        /** SimulationResult */
+        SimulationResult: {
+            /** Profile Id */
+            profile_id: string;
+            /** Days */
+            days: number;
+            /** Horizon Months */
+            horizon_months: number;
+            /** Paths */
+            paths: number;
+            /** Cushion */
+            cushion: number;
+            baseline_summary: components["schemas"]["SimSummary"];
+            scenario_summary: components["schemas"]["SimSummary"];
+            diff: components["schemas"]["SimDiff"];
+            /** Baseline Monthly */
+            baseline_monthly: components["schemas"]["MonthEndPoint"][] | null;
+            /** Scenario Monthly */
+            scenario_monthly: components["schemas"]["MonthEndPoint"][] | null;
+            /** Flows */
+            flows: number;
+            /** @default null */
+            plan?: components["schemas"]["StrategyResult"] | null;
+            /** Warnings */
+            warnings?: components["schemas"]["PayoffWarning"][];
+        };
+        /** SimulationSummary */
+        SimulationSummary: {
+            /** Profile Id */
+            profile_id: string;
+            /** Horizon Months */
+            horizon_months: number;
+            /** Cushion */
+            cushion: number;
+            baseline: components["schemas"]["SimSummary"];
+            scenario: components["schemas"]["SimSummary"];
+            diff: components["schemas"]["SimDiff"];
+            /** Flows */
+            flows: number;
+            payoff: components["schemas"]["StrategySummary"] | null;
+            /** Warnings */
+            warnings: components["schemas"]["PayoffWarning"][];
+        };
+        /** SimulatePayoffArgs */
+        SimulatePayoffArgs: {
+            /**
+             * Strategy
+             * @description Omit to use the recommended strategy (A if none). A avalanche, B snowball, C lump sum then minimums, D lump sum then avalanche, E minimums only, F custom
+             * @default null
+             */
+            strategy?: ("A" | "B" | "C" | "D" | "E" | "F") | null;
+            /**
+             * Extra Monthly
+             * @description Extra per month on top of minimums; omit to use the monthly surplus, 0 means none
+             * @default null
+             */
+            extra_monthly?: number | null;
+            /**
+             * Lump Sum
+             * @description One-time payment from cash at month 0; omit to use the safe lump sum, 0 means none
+             * @default null
+             */
+            lump_sum?: number | null;
+            /**
+             * Order
+             * @description Account ids in the order extra money should go (strategy F)
+             * @default null
+             */
+            order?: string[] | null;
+        };
+        /** PayoffSimulation */
+        PayoffSimulation: {
+            /**
+             * No Debt
+             * @default false
+             */
+            no_debt?: boolean;
+            /** @default null */
+            strategy?: components["schemas"]["StrategyResult"] | null;
+            /** @default null */
+            simulation?: components["schemas"]["SimulationResult"] | null;
+        };
+        /** PayoffSimulationSummary */
+        PayoffSimulationSummary: {
+            /** No Debt */
+            no_debt: boolean;
+            strategy: components["schemas"]["StrategySummary"] | null;
+            simulation: components["schemas"]["SimulationSummary"] | null;
+        };
     };
     responses: never;
     parameters: never;
