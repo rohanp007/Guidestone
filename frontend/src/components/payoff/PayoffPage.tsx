@@ -10,6 +10,7 @@ import CompareTable, { type CompareRowData } from "@/components/charts/CompareTa
 import ForecastBand, { type BandSeries, type ShadedRange } from "@/components/charts/ForecastBand";
 import StatRow from "@/components/charts/StatRow";
 import PageShell from "@/components/shell/PageShell";
+import AgentActivity from "@/components/agent/AgentActivity";
 import Controls from "./Controls";
 import { useMinimumOnly, usePayoff } from "./usePayoff";
 
@@ -192,9 +193,12 @@ function Body({ me }: { me: Me }) {
   return (
     <div className="fade-in">
       <Verdict view={view} />
+      <div className="lg:hidden"><AgentActivity h={p.agent} variant="sheet" /></div>
+      <div className="h-12 lg:hidden" aria-hidden />
       <div className="grid gap-x-12 gap-y-10 lg:grid-cols-[minmax(0,1fr)_340px]">
         <aside className="lg:order-last">
-          <div className="lg:sticky lg:top-4">
+          <div className="space-y-4 lg:sticky lg:top-4">
+            <div className="hidden lg:block"><AgentActivity h={p.agent} variant="panel" /></div>
             <Controls controls={p.controls} view={view} defaults={p.defaults} totalCash={me.summary?.liquid_cash ?? 0} mode={mode} onChange={p.set} onReset={p.reset} loading={p.loading} failed={p.failed} />
           </div>
         </aside>

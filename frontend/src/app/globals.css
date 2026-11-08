@@ -100,3 +100,7 @@ input[type="range"].range:disabled { cursor: not-allowed; opacity: 0.45; }
 .range::-webkit-slider-thumb { -webkit-appearance: none; width: 20px; height: 20px; margin-top: -8px; border-radius: 50%; background: var(--navy); border: 2px solid var(--surface); transition: transform 150ms var(--ease); }
 .range::-moz-range-thumb { width: 16px; height: 16px; border-radius: 50%; background: var(--navy); border: 2px solid var(--surface); }
 .range:active::-webkit-slider-thumb { transform: scale(1.1); }
+
+/* agent activity: a spinning arc for "running" (reduced motion shortens it to nothing, leaving a static arc) */
+@keyframes spin { to { transform: rotate(360deg); } }
+.spin { transform-origin: 50% 50%; animation: spin 900ms linear infinite; }

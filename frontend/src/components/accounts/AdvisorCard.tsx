@@ -1,6 +1,9 @@
 "use client";
 import Link from "next/link";
-import { runAgent, type Advice } from "@/lib/api";
+import type { Advice } from "@/lib/api";
+import { streamAgent } from "@/lib/agentStream";
+import { useAgentActivity, type AgentActivityHandle } from "@/lib/useAgentActivity";
+import AgentActivity from "@/components/agent/AgentActivity";
 import { Badge, Skeleton, Unavailable, useLoad, type Tone } from "./ui";
 
 const VERDICT: Record<Advice["verdict"], { label: string; tone: Tone }> = {
@@ -13,9 +16,11 @@ const PAYOFF_MOVES = new Set(["pay_card_high_apr", "pay_loan_high_apr"]);
 
 /** The advisor can take 20+ seconds, so the page never waits for it. A newer run replacing ours (409, e.g. the sign-in warm-up) is
  *  expected: ask again and get that run's result. */
-async function fetchAdvice(): Promise<Advice> {
+async function fetchAdvice(h: Pick<AgentActivityHandle, "begin" | "onEvent" | "finish">): Promise<Advice> {
   for (let attempt = 0; attempt < 3; attempt++) {
-    const r = await runAgent("dashboard_open");
+    h.begin();
+    let r;
+    try { r = await streamAgent("dashboard_open", { onEvent: h.onEvent }); } finally { h.finish(); }
     if (r) {
       if (!r.result.advice) throw new Error("no advice");
       return r.result.advice;
@@ -26,7 +31,8 @@ async function fetchAdvice(): Promise<Advice> {
 }
 
 export default function AdvisorCard() {
-  const { data, error } = useLoad(fetchAdvice);
+  const agent = useAgentActivity();
+  const { data, error } = useLoad(() => fetchAdvice(agent));
   return (
     <section aria-labelledby="advisor-h" className="rounded-[6px] border border-line-strong bg-surface p-5 sm:p-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -57,6 +63,7 @@ export default function AdvisorCard() {
           </ol>
         )}
       </div>
+      <AgentActivity h={agent} variant="inline" />
     </section>
   );
 }

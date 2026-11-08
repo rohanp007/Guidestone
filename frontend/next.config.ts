@@ -1,6 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // the agent stream (server-sent events) goes through the /api rewrite; gzip would hold events back until the run ends
+  compress: false,
   distDir: process.env.NEXT_DIST_DIR || ".next",   // lets a second dev server run beside the first
   // the browser only ever talks to this origin; /api/* is forwarded to the backend, so the session cookie is same-origin
   async rewrites() {
