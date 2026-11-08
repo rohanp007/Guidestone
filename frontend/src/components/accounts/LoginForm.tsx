@@ -26,6 +26,7 @@ export default function LoginForm({ passwordHint }: { passwordHint?: string }) {
     try {
       await login(email, password);
       setPassword("");
+      setEmail("");                  // this page can stay mounted behind /accounts: do not offer the last user's email after sign-out
       router.replace("/accounts");
     } catch (err) {
       setPassword("");

@@ -35,8 +35,10 @@ export class ApiError extends Error {
 }
 
 /** Where an expired or missing session sends the browser. The login page itself must not redirect to itself. */
+/** Set while signing out: requests still in flight when the session ends will 401, and that must not bounce the page a second time. */
+let signingOut = false;
 // eslint-disable-next-line @next/next/no-location-assign-relative-destination -- outside React; a full navigation also drops any signed-in state
-const toLogin = () => { if (typeof window !== "undefined" && window.location.pathname !== "/login") window.location.assign("/login?expired=1"); };
+const toLogin = () => { if (!signingOut && typeof window !== "undefined" && window.location.pathname !== "/login") window.location.assign("/login?expired=1"); };
 
 async function request<T>(path: string, init?: RequestInit, opts: { redirectOn401?: boolean } = {}): Promise<{ data: T; headers: Headers }> {
   // the session is an httpOnly cookie: the browser attaches it, scripts never see it
@@ -54,13 +56,17 @@ const query = (params: Record<string, unknown> = {}) => {
   return s ? `?${s}` : "";
 };
 
+let meOnce: Promise<Me> | null = null;
+/** One /api/me request shared by every page component. Cleared on login and logout: the page is not reloaded between users. */
+export const getMeOnce = () => (meOnce ??= getMe().catch((e) => { meOnce = null; throw e; }));
+
 /** Who is signed in. Pass `redirect: false` to get the 401 back instead of being sent to /login (used by the login page). */
 export const getMe = (redirect = true) => request<Me>("/api/me", undefined, { redirectOn401: redirect }).then((r) => r.data);
 export const login = (email: string, password: string) =>
   request<{ customer_id: string; first_name: string }>("/api/auth/login", {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, password }),
-  }, { redirectOn401: false }).then((r) => r.data);
-export const logout = () => request<null>("/api/auth/logout", { method: "POST" }, { redirectOn401: false }).then(() => undefined);
+  }, { redirectOn401: false }).then((r) => { meOnce = null; signingOut = false; return r.data; });
+export const logout = () => { signingOut = true; return request<null>("/api/auth/logout", { method: "POST" }, { redirectOn401: false }).then(() => undefined).finally(() => { meOnce = null; }); };
 /** Demo mode only (404 otherwise): the featured customers, as email prefills for the login form. */
 export const demoPersonas = () => request<DemoPersona[]>("/api/auth/demo-personas", undefined, { redirectOn401: false }).then((r) => r.data);
 
@@ -107,7 +113,3 @@ export async function runAgent(event: string, opts: { refresh?: boolean; params?
     throw e;
   }
 }
-
-let meOnce: Promise<Me> | null = null;
-/** One /api/me request shared by every page component (a failure is not remembered, so a retry can succeed). */
-export const getMeOnce = () => (meOnce ??= getMe().catch((e) => { meOnce = null; throw e; }));
