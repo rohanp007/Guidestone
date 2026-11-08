@@ -11,7 +11,7 @@ from .client import Tool
 
 # The arguments an agent may set, per formula. The full schema (nested what-if definitions, seeds, path counts) costs hundreds of prompt
 # tokens on every call and invites invented arguments; anything left out takes the formula's default.
-AGENT_ARGS: dict[str, tuple[str, ...]] = {"forecast_liquid_summary": ("horizon_months",)}
+AGENT_ARGS: dict[str, tuple[str, ...]] = {"forecast_liquid_summary": ("horizon_months",), "job_loss_stress": ("horizon_months", "target_months")}
 
 
 def session_tool(profile: Profile, name: str, args: tuple[str, ...] | None = None) -> Tool:

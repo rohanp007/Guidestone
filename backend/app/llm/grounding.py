@@ -18,6 +18,7 @@ from pydantic import BaseModel
 
 from . import client
 
+RETRY_TEMPERATURE = 0.4          # a retry at temperature 0 would repeat the rejected wording
 MONTHS = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"]
 _MONTH_RE = "|".join(m.capitalize() for m in MONTHS) + "|" + "|".join(m[:3].capitalize() for m in MONTHS)
 WORD_NUMBERS = {w: i for i, w in enumerate("zero one two three four five six seven eight nine ten eleven twelve".split())} | {
@@ -254,8 +255,9 @@ def check(text: str, facts: dict, context_numbers: tuple[float, ...] = (), judgm
         if not claim(m, "bare"):
             continue
         v = float(num)
-        pool = paths_ok([f for f in allowed if f.kind == "money"], _hints(text, m.start(), m.end()))
-        hit = next((f for f in pool if _money_matches(v, False, None, abs(f.value))), None)
+        pool = paths_ok([f for f in allowed if f.kind in ("money", "ratio")], _hints(text, m.start(), m.end()))
+        # a ratio fact may be quoted as its raw value (chance of overdraft 0.0, share of days 0.03)
+        hit = next((f for f in pool if (_money_matches(v, False, None, abs(f.value)) if f.kind == "money" else abs(v - f.value) <= 0.005)), None)
         numbers.append(CheckedNumber(m.group(0), v, "number", hit.path if hit else None))
 
     conflicts = check_wording(text, facts, judgments)
@@ -274,7 +276,7 @@ _PRAISE = r"(?:large|big|strong|healthy|comfortable|ample|solid|generous|substan
 _UP = r"\b(?:grow\w*|ris(?:e|es|ing)|increas\w*|improv\w*|climb\w*)\b"
 _DOWN = r"\b(?:shrink\w*|declin\w*|decreas\w*|deteriorat\w*|worsen\w*)\b"
 _NEG_BEFORE = re.compile(r"\b(?:never|not|no|without|nor)\b|n't", _I)       # "never dips below the cushion" says the opposite
-_LOW_AFTER = re.compile(r"\s*(?:is|are|looks?|seems?)\s+(?:very |extremely )?(?:minimal|low|negligible|zero|nil|none|unlikely|0(?:\.0+)?\s?(?:%|percent))", _I)
+_LOW_AFTER = re.compile(r"\s*(?:is|are|looks?|seems?)\s+(?:very |extremely )?(?:minimal|low|negligible|zero|nil|none|unlikely|0(?:\.0+)?\s?(?:%|percent)?(?!\d|\.\d))", _I)
 
 
 @dataclass(frozen=True)
@@ -410,7 +412,7 @@ async def grounded_complete(agent: str, messages: list[dict], facts: dict, schem
         retry = await client.complete(
             agent, messages + [{"role": "assistant", "content": result.content},
                                {"role": "user", "content": complaint + "Rewrite using only figures from the facts."}],
-            json_schema=schema, **kwargs)
+            json_schema=schema, **{**kwargs, "temperature": RETRY_TEMPERATURE})
         calls.append(retry)
         parsed = retry.parsed
         report = verify(parsed)

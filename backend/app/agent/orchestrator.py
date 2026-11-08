@@ -1,1 +1,284 @@
-"""Agent orchestrator."""
+"""Orchestrator v1: one event, dashboard_open.
+
+precompute (parallel, no LLM) -> facts (labels set in code) -> plan (one structured LLM call, validated in code, default plan on any
+failure) -> execute (parallel) -> grounded explanation (template on failure) -> result.
+
+Rules: the customer is whoever the session says (`profile` is an argument, never something the model names); numbers come from
+formulas; judgments are labels computed in code; the trace holds tool names, codes, timings and counts, never prompt or model text.
+"""
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import os
+import time
+import uuid
+from dataclasses import dataclass, field
+from typing import Any
+
+from ..api.serialize import to_plain
+from ..data import loader
+from ..data.models import Profile
+from ..formulas.registry import FORMULAS
+from ..llm import client, grounding
+from ..llm.facts import forecast_facts
+from ..llm.prompts import FACTS_PROMPT
+from ..llm.tools import Tool, session_tool
+from . import cache
+from .events import EventSpec, get_event
+from .models import MAX_STEPS, AnalysisResult, GroundingSummary, Plan, PlanStep, Summary, TraceStep
+from .prompts import EXPLAIN_V1, ORCH_PLAN_V1, PROMPT_VERSION, TOOL_HINTS
+
+log = logging.getLogger("guidestone.agent")
+RUN_TIMEOUT_S = 30.0
+PLAN_MAX_TOKENS = 200
+EXPLAIN_MAX_TOKENS = 200
+
+
+@dataclass
+class _State:
+    """Everything a run has produced so far, so a timeout can still return the partial result."""
+    spec: EventSpec
+    profile: Profile
+    inputs: dict
+    run_id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
+    trace: list[TraceStep] = field(default_factory=list)
+    compute: dict[str, Any] = field(default_factory=dict)
+    seen: set[str] = field(default_factory=set)          # (tool, canonical args) already computed
+    raw: dict[str, Any] = field(default_factory=dict)    # formula results as objects, for the fact sheet
+    facts: dict | None = None
+    summary: Summary | None = None
+    degraded: bool = False
+    llm_trace: list[dict] = field(default_factory=list)
+
+
+def _canon(tool: str, args: dict) -> str:
+    return f"{tool}:{json.dumps(args, sort_keys=True, default=str)}"
+
+
+def _store(st: _State, tool: str, value: Any) -> None:
+    key, n = tool, 1
+    while key in st.compute:
+        n += 1
+        key = f"{tool}#{n}"
+    st.compute[key] = to_plain(value)
+
+
+async def _timed(st: _State, kind: str, name: str, coro, **detail):
+    """Await `coro`, adding a trace step. Returns (value, ok)."""
+    t0 = time.perf_counter()
+    try:
+        value, ok = await coro, True
+        extra = {}
+    except Exception as e:                      # recorded by type only; the caller decides whether this is fatal
+        value, ok, extra = e, False, {"error": type(e).__name__}
+    st.trace.append(TraceStep(kind=kind, name=name, ms=round((time.perf_counter() - t0) * 1000, 1), ok=ok, detail={**detail, **extra}))
+    return value, ok
+
+
+# ---- precompute ----------------------------------------------------------------------------------------------------------------
+
+async def precompute(st: _State) -> None:
+    """Every formula the event always needs. A failure here is a bug, not a model problem: the run fails."""
+    tools = [(s, session_tool(st.profile, s.tool)) for s in st.spec.precompute]
+
+    async def one(step: PlanStep, tool: Tool):
+        value, ok = await _timed(st, "precompute", step.tool, tool.arun(step.args))
+        if not ok:
+            raise value
+        return step, tool, value
+
+    for step, tool, value in await asyncio.gather(*(one(s, t) for s, t in tools)):
+        st.seen.add(_canon(step.tool, tool.validate(step.args).model_dump()))
+        st.compute[step.tool] = to_plain(value)
+        st.raw[step.tool] = value
+
+
+# ---- facts ---------------------------------------------------------------------------------------------------------------------
+
+def _usd(x: float) -> str:
+    return f"${abs(x):,.0f}"
+
+
+def build_facts(st: _State) -> dict:
+    """The forecast fact sheet (labels, overall_status) plus the dashboard facts, and display strings for the key amounts."""
+    facts = forecast_facts(st.raw["forecast_liquid_summary"])
+    p2p = st.raw["paycheck_to_paycheck"]
+    facts["paycheck_to_paycheck"] = "yes" if p2p.flag else "no"
+    facts["employment"] = st.profile.employment
+    facts["display"] = {k: v for k, v in {
+        "start_balance": _usd(facts["start_balance"]), "monthly_gain": f"{_usd(facts['monthly_gain'])} a month",
+        "lowest_point": _usd(facts["low_point"]["amount"]), "cushion": _usd(facts["cushion"]),
+        "balance_at_end": _usd(facts["end_balance"]["p50"]) if "end_balance" in facts else None}.items() if v}
+    return facts
+
+
+# ---- plan ----------------------------------------------------------------------------------------------------------------------
+
+def _describe(tool: Tool) -> str:
+    props = tool.args.model_json_schema().get("properties", {})
+    args = []
+    for k, v in props.items():
+        rng = ", ".join(f"{b} {v[b]}" for b in ("minimum", "maximum") if b in v)
+        args.append(f"{k} ({v.get('type', 'any')}{', ' + rng if rng else ''}; default {v.get('default')})")
+    return f"- {tool.name}: {tool.description} {TOOL_HINTS.get(tool.name, '')} Args: {'; '.join(args) or 'none'}."
+
+
+def _planner_messages(st: _State, tools: list[Tool]) -> list[dict]:
+    f = st.facts
+    context = (f"Customer: cushion_status={f['cushion_status']}, trend={f['trend']}, overdraft_status={f['overdraft_status']}, "
+               f"paycheck_to_paycheck={f['paycheck_to_paycheck']}, employment={f['employment']}.")
+    return [{"role": "system", "content": ORCH_PLAN_V1 + "\n\nTools:\n" + "\n".join(_describe(t) for t in tools)},
+            {"role": "user", "content": context}]
+
+
+def validate_plan(st: _State, plan: Plan) -> tuple[list[tuple[PlanStep, Tool, dict]], list[tuple[str, str]]]:
+    """(accepted steps with their tool and validated args, rejected as (tool name, code)). Codes: not_allowed, bad_args, duplicate,
+    too_many. Only tool names the registry knows are ever recorded; anything else is 'unknown'."""
+    allowed = st.spec.tools_for(st.profile)
+    seen, ok, rejected = set(st.seen), [], []
+    for step in plan.steps:
+        name = step.tool if step.tool in FORMULAS else "unknown"
+        if len(ok) >= MAX_STEPS:
+            rejected.append((name, "too_many")); continue
+        if step.tool not in allowed:
+            rejected.append((name, "not_allowed")); continue
+        tool = session_tool(st.profile, step.tool)
+        try:
+            args = tool.validate(step.args).model_dump()
+        except client.ToolArgumentError:
+            rejected.append((name, "bad_args")); continue
+        if _canon(step.tool, args) in seen:
+            rejected.append((name, "duplicate")); continue
+        seen.add(_canon(step.tool, args))
+        ok.append((step, tool, args))
+    return ok, rejected
+
+
+async def plan_steps(st: _State) -> list[tuple[PlanStep, Tool, dict]]:
+    """One structured LLM call. Never raises because planning failed: the event's default plan takes over."""
+    allowed = st.spec.tools_for(st.profile)
+    t0 = time.perf_counter()
+    try:
+        res = await client.complete("orchestrator", _planner_messages(st, [session_tool(st.profile, t) for t in allowed]),
+                                    json_schema=Plan, max_tokens=PLAN_MAX_TOKENS, schema_in_prompt=False)
+        steps, rejected = validate_plan(st, res.parsed)
+        st.trace.append(TraceStep(kind="plan", name="orchestrator", ms=round((time.perf_counter() - t0) * 1000, 1),
+                                  detail={"steps": len(steps), "rejected": len(rejected), "proposed": len(res.parsed.steps)}))
+        st.trace += [TraceStep(kind="plan_rejected", name=n, ok=False, detail={"code": c}) for n, c in rejected]
+        if rejected:
+            st.degraded = True
+        return steps
+    except client.LLMError as e:
+        st.degraded = True
+        st.trace.append(TraceStep(kind="fallback", name="plan", ms=round((time.perf_counter() - t0) * 1000, 1), ok=False,
+                                  detail={"reason": type(e).__name__, "default_steps": len(st.spec.default_plan(st.profile))}))
+        steps, _ = validate_plan(st, Plan(steps=st.spec.default_plan(st.profile)))
+        return steps
+
+
+# ---- execute -------------------------------------------------------------------------------------------------------------------
+
+async def execute(st: _State, steps: list[tuple[PlanStep, Tool, dict]]) -> None:
+    """Run the accepted steps in parallel. A failed step is recorded and skipped."""
+    async def one(step: PlanStep, tool: Tool, args: dict):
+        return step, await _timed(st, "tool", step.tool, tool.arun(args), reason_len=len(step.reason))
+
+    for step, (value, ok) in await asyncio.gather(*(one(*s) for s in steps)):
+        if ok:
+            _store(st, step.tool, value)
+        else:
+            st.degraded = True
+
+
+# ---- explain -------------------------------------------------------------------------------------------------------------------
+
+def _template_summary(st: _State) -> Summary:
+    text = grounding.template(st.facts)
+    rep = grounding.check(text, st.facts, judgments=True)
+    return Summary(text=text, source="template", grounding=GroundingSummary(ok=rep.ok, checked=len(rep.numbers), retried=False))
+
+
+async def explain(st: _State) -> None:
+    messages = [{"role": "system", "content": EXPLAIN_V1 + FACTS_PROMPT},
+                {"role": "user", "content": "Facts:\n" + json.dumps(st.facts, separators=(",", ":"))}]
+    t0 = time.perf_counter()
+    try:
+        out = await grounding.explain("presenter", messages, st.facts, context_numbers=(12, 24), max_tokens=EXPLAIN_MAX_TOKENS)
+        st.summary = Summary(text=out.text, source="template" if out.used_template else "model", hint=out.parsed.next_step_hint,
+                             grounding=GroundingSummary(ok=out.report.ok, checked=len(out.report.numbers), retried=out.retried))
+        st.trace.append(TraceStep(kind="explain", name="presenter", ms=round((time.perf_counter() - t0) * 1000, 1),
+                                  detail={"retried": out.retried, "template": out.used_template, "checked": len(out.report.numbers)}))
+        if out.used_template:
+            st.degraded = True
+    except client.LLMError as e:
+        st.degraded = True
+        st.summary = _template_summary(st)
+        st.trace.append(TraceStep(kind="fallback", name="explain", ms=round((time.perf_counter() - t0) * 1000, 1), ok=False,
+                                  detail={"reason": type(e).__name__}))
+
+
+# ---- the run -------------------------------------------------------------------------------------------------------------------
+
+def _assemble(st: _State, data_version: str) -> AnalysisResult:
+    return AnalysisResult(
+        run_id=st.run_id, event=st.spec.name, feature=st.spec.feature, customer_id=st.profile.id, as_of=st.profile.as_of_date.isoformat(),
+        prompt_version=PROMPT_VERSION, data_version=data_version, inputs=st.inputs, compute=st.compute, facts=st.facts or {},
+        status=(st.facts or {}).get("overall_status"), summary=st.summary, trace=st.trace, llm_trace=st.llm_trace, degraded=st.degraded)
+
+
+async def _pipeline(st: _State) -> None:
+    st.llm_trace = client.start_run()
+    await precompute(st)
+    st.facts = build_facts(st)
+    steps = await plan_steps(st)
+    await execute(st, steps)
+    if st.spec.explain:
+        await explain(st)
+
+
+async def _execute(st: _State, data_version: str) -> AnalysisResult:
+    try:
+        async with asyncio.timeout(RUN_TIMEOUT_S):
+            await _pipeline(st)
+    except TimeoutError:
+        if st.facts is None:                    # not even the precompute finished: nothing to show
+            raise
+        st.degraded = True
+        st.trace.append(TraceStep(kind="fallback", name="timeout", ok=False, detail={"limit_s": RUN_TIMEOUT_S}))
+        if st.spec.explain and st.summary is None:
+            st.summary = _template_summary(st)
+    return _assemble(st, data_version)
+
+
+async def run(event: str, profile: Profile, params: dict, refresh: bool = False) -> AnalysisResult:
+    """KeyError for an unknown event, pydantic.ValidationError for bad params. `profile` is the signed-in customer's own."""
+    spec = get_event(event)
+    args = spec.params.model_validate(params).model_dump(mode="json")
+    data_version = loader.cache_key()[:12]
+    key = cache.cache_key(profile.id, event, args, PROMPT_VERSION, data_version)
+    if spec.cache != "none" and not refresh and (hit := cache.get(key)) is not None:
+        return hit.with_trace(TraceStep(kind="cache_hit", name=event))
+
+    async def go() -> AnalysisResult:
+        result = await _execute(_State(spec, profile, args), data_version)
+        if spec.cache != "none":
+            cache.put(key, result)
+        return result
+
+    return await cache.run_exclusive(profile.id, event, key, go, restart=refresh)
+
+
+def is_cache_hit(result: AnalysisResult) -> bool:
+    return bool(result.trace) and result.trace[-1].kind == "cache_hit"
+
+
+async def warm(profile: Profile) -> None:
+    """Start dashboard_open at sign-in so the result is usually cached by the time the page asks. Never raises."""
+    if os.environ.get("AGENT_WARM_ON_LOGIN", "true").strip().lower() not in ("1", "true", "yes"):
+        return
+    try:
+        await run("dashboard_open", profile, {})
+    except Exception as e:
+        log.warning("warm-up failed: %s", type(e).__name__)

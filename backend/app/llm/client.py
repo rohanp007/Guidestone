@@ -171,6 +171,15 @@ def _client(cfg: config.AgentConfig) -> openai.AsyncOpenAI:
     return cached[1]
 
 
+def prewarm() -> None:
+    """Build the HTTP clients for every configured local backend now (SSL setup is slow enough to show in the first request).
+    Call from async code, at startup."""
+    for agent in config.AGENTS:
+        cfg = config.agent_config(agent)
+        if cfg.backend != "hosted":
+            _client(cfg)
+
+
 def minimize(messages: list[dict]) -> list[dict]:
     """Will strip personal data from messages before they go to a hosted backend."""
     raise NotImplementedError("minimizer is not implemented yet")
@@ -194,7 +203,8 @@ class _BadReply(LLMResponseError):
         self.followup = followup
 
 
-def _prepare(cfg: config.AgentConfig, messages: list[dict], schema: type[BaseModel] | None, tools: bool = False) -> list[dict]:
+def _prepare(cfg: config.AgentConfig, messages: list[dict], schema: type[BaseModel] | None, tools: bool = False,
+             instruct: bool = True) -> list[dict]:
     """Copy of the messages with the system prompt rebuilt as: reasoning flag, base agent prompt (when tools are offered), the caller's
     system prompt. The JSON instruction goes in a final user message, where a small model heeds it (in the system prompt it answered in
     prose and cost a retry). Fixed text first and per-call text last, so a server that caches the prompt prefix can reuse it."""
@@ -204,16 +214,16 @@ def _prepare(cfg: config.AgentConfig, messages: list[dict], schema: type[BaseMod
     if has_system:
         parts.append(msgs[0].get("content") or "")
     msgs[:1 if has_system else 0] = [{"role": "system", "content": "\n".join(parts)}]
-    if schema:
+    if schema and instruct:
         msgs.append({"role": "user", "content": "Reply with only a JSON object (no prose, no code fences) that matches this JSON Schema: "
                                                 + json.dumps(schema.model_json_schema(), separators=(",", ":"))})
     return msgs
 
 
 async def _request(cfg: config.AgentConfig, msgs: list[dict], tools: list[Tool] | None, tool_choice: str | dict, stats: _Stats,
-                   max_tokens: int | None = None) -> Any:
+                   max_tokens: int | None = None, temperature: float | None = None) -> Any:
     """One chat completion. Timeout / connection error / 5xx / 429: retried once, then LLMUnavailable. Other 4xx: LLMRequestError."""
-    kwargs: dict = {"model": cfg.model, "messages": msgs, "timeout": cfg.timeout, "temperature": cfg.temperature,
+    kwargs: dict = {"model": cfg.model, "messages": msgs, "timeout": cfg.timeout, "temperature": cfg.temperature if temperature is None else temperature,
               "max_tokens": max_tokens or cfg.max_tokens}
     if tools:
         if tool_choice == "required" and not cfg.supports_required_tool_choice:
@@ -293,15 +303,19 @@ def _parse(resp: Any, tools: list[Tool] | None, schema: type[BaseModel] | None) 
 
 
 async def complete(agent: str, messages: list[dict], tools: list[Tool] | None = None, json_schema: type[BaseModel] | None = None,
-                   tool_choice: str | dict = "auto", max_tokens: int | None = None) -> LLMResult:
+                   tool_choice: str | dict = "auto", max_tokens: int | None = None,
+                   schema_in_prompt: bool = True, temperature: float | None = None) -> LLMResult:
     """tool_choice: "auto", "required" (must call a tool; downgraded to "auto" on llama-server, which the trace records) or "none".
-    max_tokens overrides the agent's default for this call (e.g. 120 for a one-sentence summary)."""
+    temperature overrides the agent's default for this call (used by retries, which at temperature 0 would repeat themselves).
+    max_tokens overrides the agent's default for this call (e.g. 120 for a one-sentence summary).
+    schema_in_prompt=False: validate against json_schema but do not append the "match this JSON Schema" message, for callers whose own
+    prompt already describes the format (shown to a small model, a bare schema invites the emptiest valid answer, e.g. {"steps":[]})."""
     cfg = config.agent_config(agent)
-    msgs = _prepare(cfg, messages, json_schema, bool(tools))
+    msgs = _prepare(cfg, messages, json_schema, bool(tools), schema_in_prompt)
     stats, ok = _Stats(), False
     try:
         for attempt in (1, 2):
-            resp = await _request(cfg, msgs, tools, tool_choice, stats, max_tokens)
+            resp = await _request(cfg, msgs, tools, tool_choice, stats, max_tokens, temperature)
             try:
                 content, calls, parsed = _parse(resp, tools, json_schema)
             except _BadReply as bad:
