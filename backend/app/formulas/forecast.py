@@ -286,10 +286,14 @@ class Sim:
 
 
 def _simulate(profile: Profile, horizon_months: int, paths: int, cushion: float, seed: int, A: dict[str, float],
-              changes: list[ForecastChange] | None, risk_factors: list[float] | None = None) -> Sim:
+              changes: list[ForecastChange] | None, risk_factors: list[float] | None = None,
+              income_scale: np.ndarray | None = None) -> Sim:
     """`risk_factors` are the calibration's month-end band factors. When given, the risk probabilities are computed on paths whose
     deviation from the median path is scaled by the factor interpolated for that day; the returned percentiles stay RAW (the
-    calibration is fit on them, and _summarize scales the bands itself)."""
+    calibration is fit on them, and _summarize scales the bands itself).
+
+    `income_scale` is (paths, months): each path's paychecks are multiplied by its value for that month (the job-loss stress test).
+    Everything else, including every random draw, is identical to the run without it, so the two runs are a paired comparison."""
     if profile.spending is None:
         raise ValueError(f"{profile.id}: needs derive.enrich() first")
     sp = profile.spending
@@ -331,6 +335,13 @@ def _simulate(profile: Profile, horizon_months: int, paths: int, cushion: float,
     daily = monthly[:, month_of_day] / ndays[month_of_day]
     card_daily = card.share * daily if card else None
     net = sch.vector()[1:][None, :] - (daily - card_daily if card else daily)
+
+    if income_scale is not None:
+        pay = np.zeros(D)
+        for e in sch.cash:
+            if e[1] == "income":
+                pay[(e[0] - sch.as_of).days - 1] += e[2]
+        net += (income_scale[:, month_of_day] - 1.0) * pay[None, :]
 
     if OPTIONS["recurring_noise"]:                                    # bills whose amount really varies: bootstrap their own residuals
         for d, _, amount, _, resid in sch.cash:

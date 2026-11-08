@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import ValidationError
 
 from ..data.models import Profile
-from ..formulas import forecast, health  # noqa: F401  (importing registers the formulas)
+from ..formulas import forecast, health, stress  # noqa: F401  (importing registers the formulas)
 from ..formulas.registry import FORMULAS
 from .deps import get_profile
 from .schemas import FormulaInfo

@@ -223,3 +223,20 @@ def test_every_formula_and_profile_survives_a_strict_json_round_trip(client, pid
             if isinstance(x, dict): stack += x.values()
             elif isinstance(x, list): stack += x
             else: assert x is None or isinstance(x, (str, bool, int)) or (isinstance(x, float) and math.isfinite(x))
+
+
+# ------------------------------------------------------------------ job-loss stress test
+def test_job_loss_stress_c002(client):
+    body = strict(client.post("/api/profiles/C002/formulas/job_loss_stress", json={}))
+    assert body["applicable"] and body["emergency_fund"]["months_covered"] < 3 and body["emergency_fund"]["gap"] > 0
+    base, markov, lost = body["scenarios"]
+    assert [base["name"], markov["name"], lost["name"]] == ["baseline", "markov", "lost_job_now"]
+    assert base["overdraft_probability"] == 0 and lost["overdraft_probability"] == 1
+    assert base["overdraft_probability"] <= markov["overdraft_probability"] <= lost["overdraft_probability"]
+    assert lost["first_overdraft_p50"] is not None and lost["months_until_overdraft_p50"] < 6
+
+
+def test_job_loss_stress_is_not_applicable_to_retirees(client):
+    retired = next(p for p in load_profiles().values() if p.employment == "retired")
+    body = strict(client.post(f"/api/profiles/{retired.id}/formulas/job_loss_stress", json={}))
+    assert body["applicable"] is False and body["scenarios"] == [] and body["emergency_fund"]["essential_monthly"] > 0

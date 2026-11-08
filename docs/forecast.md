@@ -155,3 +155,19 @@ Computed from the schedule, not guessed, and listed in `events` for the UI and t
 forecast applies them. Backtest, 180-day median error / raw month-end coverage: no seasonality 6.2% / 0.60; half the observed swing
 6.8% / 0.58; all of it 7.1% / 0.55. It made the forecast worse, so `UTILITY_SEASON_SHRINK = 0.0` (off) and the calibration is unchanged.
 Revisit once the unexplained July over-forecast is understood.
+
+## Emergency fund and job-loss stress test (`job_loss_stress`)
+
+Runs the liquid-cash forecast three times on the same random draws (a paired comparison): unchanged (`baseline`); income following
+a monthly employed / unemployed Markov chain (`markov`); and the paycheck stopping next month with no new job (`lost_job_now`).
+While unemployed the customer gets Pennsylvania unemployment benefits for 6 months (half of gross pay, capped), then nothing.
+The `emergency_fund` block gives months of essentials covered, the gap to a 3-month target, and months to close it at the current surplus.
+Retirees return `applicable: false` (no paycheck to lose).
+
+Rates and their sources are in `assumptions.json`: job loss 0.89% a month (BLS CPS flows, Jun-Oct 2026); re-employment 16% a month,
+chosen to match BLS mean unemployment duration (27.1 weeks), not the raw 25% flow rate, so a long job loss is not understated.
+Caveats: the PA weekly maximum ($604) comes from an undated chart and is unconfirmed; benefits are treated as take-home; a new job restores
+full pay immediately; the chain is memoryless, so it cannot match both the mean and the median spell length.
+
+C002 (29, renter): 1.7 months of essentials covered (gap $2,866, about 3.3 months of surplus to close it). Overdraft probability over 24
+months: 0% baseline, 8% with the Markov chain, 100% if the job is lost now (median path overdrawn about 2.3 months after the loss).

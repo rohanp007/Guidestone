@@ -417,6 +417,8 @@ export interface components {
             last_date: string;
             /** Account Id */
             account_id: string;
+            /** Month Factors */
+            month_factors?: number[];
             /** Residuals */
             residuals?: number[];
         };
@@ -878,6 +880,111 @@ export interface components {
             score: number;
             /** Reasons */
             reasons: string[];
+        };
+        /** JobLossArgs */
+        JobLossArgs: {
+            /**
+             * Horizon Months
+             * @description Months to simulate
+             * @default 24
+             */
+            horizon_months?: number;
+            /**
+             * Paths
+             * @description Monte Carlo paths; default from assumptions.json
+             * @default null
+             */
+            paths?: number | null;
+            /**
+             * Seed
+             * @description Changes the random draws; the same arguments always give identical output
+             * @default 0
+             */
+            seed?: number;
+            /**
+             * Target Months
+             * @description Emergency fund target in months of essentials; default from assumptions.json
+             * @default null
+             */
+            target_months?: number | null;
+        };
+        /** EmergencyFund */
+        EmergencyFund: {
+            /** Liquid Cash */
+            liquid_cash: number;
+            /** Essential Monthly */
+            essential_monthly: number;
+            /** Months Covered */
+            months_covered: number;
+            /** Target Months */
+            target_months: number;
+            /** Target Amount */
+            target_amount: number;
+            /** Gap */
+            gap: number;
+            /** Months To Target */
+            months_to_target: number | null;
+        };
+        /** MarkovInfo */
+        MarkovInfo: {
+            /** Monthly Job Loss */
+            monthly_job_loss: number;
+            /** Monthly Reemployment */
+            monthly_reemployment: number;
+            /** Expected Spell Months */
+            expected_spell_months: number;
+            /** Ui Income Share */
+            ui_income_share: number;
+            /** Ui Months */
+            ui_months: number;
+            /** Probability Any Job Loss */
+            probability_any_job_loss: number;
+            /** Average Months Unemployed */
+            average_months_unemployed: number;
+        };
+        /** StressScenario */
+        StressScenario: {
+            /** Name */
+            name: string;
+            /** Description */
+            description: string;
+            /** Overdraft Probability */
+            overdraft_probability: number;
+            /** Cushion Probability */
+            cushion_probability: number;
+            /** First Overdraft P50 */
+            first_overdraft_p50: string | null;
+            /** First Overdraft P10 */
+            first_overdraft_p10: string | null;
+            /** Months Until Overdraft P50 */
+            months_until_overdraft_p50: number | null;
+            /** Month End P50 */
+            month_end_p50: number[];
+            /** Month End P10 */
+            month_end_p10: number[];
+        };
+        /** JobLossStress */
+        JobLossStress: {
+            /** Profile Id */
+            profile_id: string;
+            /** Applicable */
+            applicable: boolean;
+            /** Note */
+            note: string | null;
+            /** Horizon Months */
+            horizon_months: number;
+            /** Paths */
+            paths: number;
+            emergency_fund: components["schemas"]["EmergencyFund"];
+            markov: components["schemas"]["MarkovInfo"] | null;
+            /** Scenarios */
+            scenarios: components["schemas"]["StressScenario"][];
+            /** Assumptions */
+            assumptions: {
+                [key: string]: {
+                    [key: string]: unknown;
+                };
+            };
         };
     };
     responses: never;
