@@ -1,0 +1,8 @@
+# backend
+fastapi
+uvicorn[standard]
+pydantic
+
+
+# data / scripts
+pyarrow

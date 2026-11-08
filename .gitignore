@@ -1,0 +1,39 @@
+# data (deterministic: regenerate with scripts/generate_bank_data.py, seed 20261107)
+/data/
+*.csv
+*.parquet
+
+# secrets
+.env
+.env.*
+!.env.example
+frontend/.env.local
+
+# python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# node / next
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+
+# runtime caches and logs
+cache/
+*.sqlite
+*.db
+*.log
+
+# local tooling
+.DS_Store
+.vscode/
+.idea/
+.claude/settings.local.json
+
+# design references (other companies' screenshots)
+design/refs/
