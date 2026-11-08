@@ -4,7 +4,7 @@ from __future__ import annotations
 from pydantic import ConfigDict, create_model
 
 from ..data.models import Profile
-from ..formulas import forecast, health, stress  # noqa: F401  (importing registers the formulas)
+from ..formulas import forecast, health, rules, stress  # noqa: F401  (importing registers the formulas)
 from ..formulas.registry import FORMULAS
 from .client import Tool
 

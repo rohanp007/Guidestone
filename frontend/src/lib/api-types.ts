@@ -1127,6 +1127,160 @@ export interface components {
             /** Reasons */
             reasons: string[];
         };
+        /** WaterfallStep */
+        WaterfallStep: {
+            /** Step */
+            step: number;
+            /** Name */
+            name: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "done" | "in_progress" | "todo" | "not_applicable" | "unknown";
+            /** Target */
+            target: number | null;
+            /** Current */
+            current: number | null;
+            /** Gap */
+            gap: number | null;
+            /** Monthly Suggested */
+            monthly_suggested: number;
+            /** Reason Code */
+            reason_code: string;
+            /**
+             * Unit
+             * @default dollars
+             * @enum {string}
+             */
+            unit?: "dollars" | "dollars_per_month";
+            /** Detail */
+            detail?: {
+                [key: string]: unknown;
+            };
+        };
+        /** Waterfall */
+        Waterfall: {
+            /** Profile Id */
+            profile_id: string;
+            /** Surplus */
+            surplus: number;
+            /** Current Step */
+            current_step: number | "gap" | null;
+            /** First Open Step */
+            first_open_step: number | null;
+            /** Steps */
+            steps: components["schemas"]["WaterfallStep"][];
+            /** Unallocated */
+            unallocated: number;
+        };
+        /** PayoffArgs */
+        PayoffArgs: {
+            /**
+             * Lump Sum
+             * @description A one-time payment from existing cash, capped by the cushion floor
+             * @default 0
+             */
+            lump_sum?: number;
+            /**
+             * Extra Monthly
+             * @description Extra per month on top of minimums; omit to use the monthly surplus, 0 means none
+             * @default null
+             */
+            extra_monthly?: number | null;
+            /**
+             * Use Cd
+             * @description Consider breaking a CD to fund debt payments
+             * @default false
+             */
+            use_cd?: boolean;
+        };
+        /** CDOption */
+        CDOption: {
+            /** Account Id */
+            account_id: string;
+            /** Balance */
+            balance: number;
+            /** Rate */
+            rate: number;
+            /** Remaining Months */
+            remaining_months: number;
+            /** Penalty */
+            penalty: number;
+            /** Interest Saved */
+            interest_saved: number;
+            /** Interest Given Up */
+            interest_given_up: number;
+            /** Net Benefit */
+            net_benefit: number;
+            /** Recommend Break */
+            recommend_break: boolean;
+        };
+        /** PayoffItem */
+        PayoffItem: {
+            /** Account Id */
+            account_id: string;
+            /** Apr */
+            apr: number;
+            /** Balance */
+            balance: number;
+            /**
+             * Reason Code
+             * @enum {string}
+             */
+            reason_code: "high_apr" | "optional" | "mortgage_extra";
+        };
+        /** PlanOutcome */
+        PlanOutcome: {
+            /** Months */
+            months: number | null;
+            /** Total Interest */
+            total_interest: number;
+        };
+        /** PayoffPriority */
+        PayoffPriority: {
+            /** Profile Id */
+            profile_id: string;
+            /** Order */
+            order: components["schemas"]["PayoffItem"][];
+            /** Safe Lump Sum */
+            safe_lump_sum: number;
+            /** Safe Lump Sum Low Cushion */
+            safe_lump_sum_low_cushion: number | null;
+            /** Lump Sum Applied */
+            lump_sum_applied: number;
+            /** Extra Monthly Applied */
+            extra_monthly_applied: number;
+            avalanche: components["schemas"]["PlanOutcome"] | null;
+            snowball: components["schemas"]["PlanOutcome"] | null;
+            /** Snowball Extra Cost */
+            snowball_extra_cost: number | null;
+            cd: components["schemas"]["CDOption"] | null;
+            /** Flags */
+            flags: string[];
+        };
+        /** CandidateMove */
+        CandidateMove: {
+            /** Move Code */
+            move_code: string;
+            /** Priority */
+            priority: number;
+            /** Addresses Current Step */
+            addresses_current_step: boolean;
+            /** Facts */
+            facts: {
+                [key: string]: unknown;
+            };
+        };
+        /** CandidateMoves */
+        CandidateMoves: {
+            /** Profile Id */
+            profile_id: string;
+            /** Current Step */
+            current_step: number | "gap" | null;
+            /** Moves */
+            moves: components["schemas"]["CandidateMove"][];
+        };
         /** JobLossArgs */
         JobLossArgs: {
             /**
