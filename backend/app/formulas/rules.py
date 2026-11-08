@@ -408,7 +408,8 @@ def candidate_moves(profile: Profile) -> CandidateMoves:
     if step[6].status == "todo" and step[6].detail.get("active"):
         add("start_education_savings", 6, dependents_under_limit=sum(d.age < T["dependent_age_limit"] for d in profile.dependents))
     if profile.credit_score < T["credit_building_score"] and not any(a.type == "credit_card" for a in profile.accounts):
-        add("start_credit_building", OPPORTUNITY, credit_score=profile.credit_score)
+        add("start_credit_building", OPPORTUNITY, credit_score=profile.credit_score,
+            secured_card=profile.credit_score < T["secured_card_score_max"])
     checking = float(sum(a.balance for a in profile.accounts if a.type == "checking"))
     safe_lump = max(0.0, liquid - T["cushion_months"] * ess)
     cash_goes_to_debt = open_(3) and safe_lump > 0                 # idle cash should pay the expensive debt, not sit in savings
@@ -431,7 +432,32 @@ def candidate_moves(profile: Profile) -> CandidateMoves:
     if surplus > 0 and saved < T["automate_coverage_min"] * surplus:
         add("automate_savings", OPPORTUNITY, surplus=_r(surplus), automated_monthly=_r(max(saved, 0.0)), coverage=round(max(saved, 0.0) / surplus, 2))
     moves.sort(key=lambda m: m.priority)                          # stable: ties keep the order above
+    _sequence_facts(moves, wf)
     return CandidateMoves(profile_id=profile.id, current_step=wf.current_step, moves=moves)
+
+
+def _sequence_facts(moves: list[CandidateMove], wf: Waterfall) -> None:
+    """Where each waterfall move sits relative to the current step, as facts the advisor words ("Once your cushion is full, ...").
+    after_step / after_step_name: a move for a LATER step (or any step move while spending exceeds income: current step "gap").
+    months_to_target: for the current step's move, how many months its gap takes if the whole allocated surplus goes to it
+    (rounded up; for step 3 it ignores interest, so it is a floor)."""
+    cur, steps = wf.current_step, {s.step: s for s in wf.steps}
+    for m in moves:
+        if cur is None or not 1 <= m.priority <= 7:
+            continue
+        if cur == "gap" or m.priority > cur:
+            m.facts["after_step"] = cur
+            m.facts["after_step_name"] = "monthly gap" if cur == "gap" else steps[cur].name
+        elif m.priority == cur and cur in (1, 3, 4):
+            s = steps[cur]
+            if s.gap and s.monthly_suggested > 0:
+                m.facts["months_to_target"] = math.ceil(s.gap / s.monthly_suggested)
+
+
+def _ended_payment_near(profile: Profile, day) -> float | None:
+    """The monthly amount of the loan or card payment stream that stopped closest to `day` (the ledger's own last payment, not an estimate)."""
+    ended = [r for r in profile.ended_recurring if r.kind in ("loan_payment", "card_payment")]
+    return abs(min(ended, key=lambda r: abs((r.last_date - day).days)).monthly_amount) if ended else None
 
 
 def _freed_payments(profile: Profile, T: dict) -> list[dict]:
@@ -439,10 +465,12 @@ def _freed_payments(profile: Profile, T: dict) -> list[dict]:
     days, out = T["freed_payment_days"], []
     for a in profile.accounts:
         if a.is_liability and a.type != "credit_card" and a.maturity_date and -days <= (a.maturity_date - profile.as_of_date).days <= days:
-            out.append({"account_id": a.id, "ends": a.maturity_date.isoformat(), "state": "ended" if a.maturity_date <= profile.as_of_date else "ending"})
+            amount = a.min_payment if a.min_payment > 0 else _ended_payment_near(profile, a.maturity_date)     # a closed loan's minimum is 0
+            out.append({"account_id": a.id, "ends": a.maturity_date.isoformat(), "state": "ended" if a.maturity_date <= profile.as_of_date else "ending",
+                        "monthly_amount": _r(amount)})
     for r in ([] if out else profile.ended_recurring):          # a payment that stopped; skipped when the closed account itself was found
         if r.kind in ("loan_payment", "card_payment") and 0 <= (profile.as_of_date - r.last_date).days <= days:
-            out.append({"account_id": r.account_id, "ends": r.last_date.isoformat(), "state": "ended"})
+            out.append({"account_id": r.account_id, "ends": r.last_date.isoformat(), "state": "ended", "monthly_amount": _r(abs(r.monthly_amount))})
     return out
 
 

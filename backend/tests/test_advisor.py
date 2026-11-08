@@ -99,15 +99,16 @@ def test_every_candidate_move_has_a_spec():
 
 def test_placeholder_names_carry_their_kind_and_templates_use_only_their_own():
     for code, spec in SPECS.items():
-        own = {p.name for p in spec.ph}
+        own = {p.name for p in spec.ph} | {p.name for codes, _, p in advisor.OPTIONAL if codes is None or code in codes}
         texts = [spec.title] + ([spec.why] if isinstance(spec.why, str) else []) + [t for _, t in spec.variants]
+        texts += [spec.later({"liquid": z, "current_monthly": z}) for z in (0.0, 1.0)] if spec.later else []
         if callable(spec.why):
             assert own, code
         assert "{" not in spec.title and spec.title[0].isupper() and not spec.title.isupper(), code
         for t in texts:
-            used = set(re.findall(r"\{(\w+)\}", t))
+            used = set(re.findall(r"\{(\w+)\}", t)) - {"once"}
             assert used <= own, (code, used - own)
-    for p in (p for s in SPECS.values() for p in s.ph):
+    for p in [*(p for s in SPECS.values() for p in s.ph), *(p for _, _, p in advisor.OPTIONAL)]:
         kind = grounding._kind_of(p.name)
         if p.fmt is advisor.pct:
             assert kind == "ratio", p.name
@@ -182,7 +183,7 @@ def test_the_response_schema_limits_move_codes_to_this_customers_other_candidate
         else:
             assert "more" not in schema["properties"]                                              # C010: nothing else to choose from
     assert advisor.response_schema(inputs["C002"][0])["properties"]["more"]["items"]["properties"]["move_code"]["enum"] == [
-        "increase_retirement", "start_credit_building", "recently_freed_payment", "automate_savings"]
+        "increase_retirement", "start_credit_building", "automate_savings"]                       # the freed payment is folded into the pinned move
 
 
 def test_the_schema_is_sent_and_a_rejecting_backend_falls_back_to_checking_here(inputs, monkeypatch):
@@ -249,7 +250,7 @@ def test_an_invented_figure_is_retried_then_that_move_gets_its_template(inputs, 
 def test_a_retry_that_fixes_it_keeps_the_model_text(inputs, monkeypatch):
     inp, facts = inputs["C002"]
     lie = ans("You have {cushion_now}, which is $99,999 too little.")
-    fixed = ans("You have {cushion_now} against a cushion of {cushion_target}.")
+    fixed = ans("You have {cushion_now} against a cushion of {cushion_target}; the {freed_amount} a month freed on {freed_date} can go straight to it.")
     model = Model(lie, fixed)
     advice = run(inp, facts, model, monkeypatch)
     assert len(model.calls) == 2 and advice.source == "model" and advice.moves[0].why_text.startswith("You have $3,718 against a cushion of $13,167")
@@ -378,16 +379,16 @@ def test_a_zero_figure_has_its_own_wording_chosen_in_code(inputs, monkeypatch):
     inp, facts = inputs["C067"]                                            # saves $0 a month for retirement
     assert inp.candidates["increase_retirement"].facts["current_monthly"] == 0
     view = advisor.model_view(inp, facts)
-    assert "aren't saving for retirement yet" in view and "You save about {retirement_monthly_now}" not in view
+    assert "start saving for retirement" in view and "You save about {retirement_monthly_now}" not in view
     tmpl = advisor.template_advice(inp)
     text = next(m.why_text for m in tmpl.moves if m.move_code == "increase_retirement")
-    assert "aren't saving for retirement yet" in text and "$0" not in text
+    assert "start saving for retirement" in text and "$0" not in text
     # a model that ignores the variant and states the zero is rejected for it, and that move falls back to the template
     zero = ans(example_of(inp, "pay_card_high_apr"),
                ("increase_retirement", "You save about {retirement_monthly_now} a month toward {retirement_monthly_target}."))
     model = Model(zero)
     advice = run(inp, facts, model, monkeypatch)
-    assert advice.diagnostics.first_reasons == ["zero_figure"] and not advice.diagnostics.first_try_ok
+    assert "zero_figure" in advice.diagnostics.first_reasons and not advice.diagnostics.first_try_ok
     assert [m for m in advice.moves if m.move_code == "increase_retirement"][0].source == "template"
     assert_grounded(advice, inp)
 
@@ -604,10 +605,146 @@ def test_a_single_pinned_candidate_skips_the_model(inputs, monkeypatch):
 def test_every_sentence_in_the_catalogue_passes_the_style_and_judgment_checks():
     """The sentences the model is shown, and the templates, must themselves be clean: a model that copies an example must not trip a check
     (it once did: a zero-figure wording said "none", which the style check rejects as raw machine output)."""
+    onces = list(advisor.ONCE.values())
     for code, spec in SPECS.items():
-        texts = [spec.title] + ([spec.why] if isinstance(spec.why, str) else [spec.why({"freed": [{"state": s}]}) for s in ("ended", "ending")]) \
+        facts = {"freed": [{"state": s}] for s in ("ended", "ending")}
+        base = [spec.title] + ([spec.why] if isinstance(spec.why, str) else [spec.why({"freed": [{"state": s}]}) for s in ("ended", "ending")]) \
             + [t for _, t in spec.variants]
-        for t in texts:
-            filled = advisor.tidy(grounding.fill(t, {p.name: "$100" for p in spec.ph}))
+        later = [spec.later({"liquid": z, "current_monthly": z}).replace("{once}", o) for z in (0.0, 1.0) for o in onces] if spec.later else []
+        freed = [advisor.sentence(code, {"freed_amount": 100.0, "freed_date": "2026-12-01", "freed_state": st, "months_to_target": 3,
+                                         "liquid": 5.0, "freed": [{"state": st}]}) for st in ("ended", "ending")] if code in (
+            "pay_card_high_apr", "pay_loan_high_apr", "build_full_cushion") else []
+        for t in base + later + [f for f in freed if f]:
+            filled = advisor.tidy(grounding.fill(t, {p.name: "$100" for p in spec.ph} | {p.name: "$100" for _, _, p in advisor.OPTIONAL}))
             conflicts = grounding.check_style(filled, {}) + grounding.check_wording(filled, {}, judgments=True)
-            assert not conflicts, (code, [c.phrase for c in conflicts])
+            assert not conflicts, (code, filled, [c.phrase for c in conflicts])
+
+
+# ---- later steps, months to target, the folded freed payment, secured cards -------------------------------------------------------
+
+def test_moves_for_a_later_step_know_what_they_follow_and_say_once(inputs):
+    inp, facts = inputs["C067"]                                         # current step 3: the card
+    cushion = inp.candidates["build_full_cushion"].facts
+    assert cushion["after_step"] == 3 and cushion["after_step_name"] == "High-interest debt"
+    assert "after_step" not in inp.candidates["pay_card_high_apr"].facts                           # the current step's move is not "later"
+    assert "after_step" not in inp.candidates["automate_savings"].facts                            # opportunities are outside the waterfall
+    for code in ("build_full_cushion", "increase_retirement"):
+        text = advisor.sentence(code, inp.candidates[code].facts)
+        assert text.startswith("Once your high-interest debt is paid off, "), (code, text)
+    assert "Once your high-interest debt is paid off, start saving for retirement" in advisor.sentence("increase_retirement", inp.candidates["increase_retirement"].facts)
+    view = advisor.model_view(inp, facts)
+    assert view.count("Once your high-interest debt is paid off") >= 2 and "{once}" not in view
+
+
+def test_while_spending_exceeds_income_every_step_move_follows_the_gap():
+    from app.formulas import rules
+    from test_rules import checking, make
+    p = make([checking(200.0)], surplus=-50.0)
+    moves = {m.move_code: m for m in rules.candidate_moves(p).moves}
+    assert "close_monthly_gap" in moves and "after_step" not in moves["close_monthly_gap"].facts
+    assert moves["build_starter_cushion"].facts["after_step"] == "gap" and advisor.ONCE["gap"] == "your monthly spending is covered"
+    assert advisor.sentence("build_full_cushion", {**moves["build_full_cushion"].facts}).startswith("Once your monthly spending is covered, ")
+
+
+def test_a_later_move_must_say_once(inputs, monkeypatch):
+    inp, facts = inputs["C067"]
+    own = example_of(inp, "pay_card_high_apr")
+    plain = ans(own, ("build_full_cushion", "You have {cushion_now} against a full cushion of {cushion_target}."))
+    model = Model(plain)
+    advice = run(inp, facts, model, monkeypatch)
+    assert "missing_once" in advice.diagnostics.first_reasons and len(model.calls) == 2
+    cushion = next(m for m in advice.moves if m.move_code == "build_full_cushion")
+    assert cushion.source == "template" and cushion.why_text.startswith("Once your high-interest debt is paid off, ")
+    ok = run(inp, facts, Model(examples), monkeypatch)
+    assert ok.diagnostics.first_try_ok and all(m.why_text.startswith("Once") for m in ok.moves if m.move_code in ("build_full_cushion", "increase_retirement"))
+
+
+def test_the_current_step_move_gets_months_to_target(inputs, monkeypatch):
+    import math
+    inp, facts = inputs["C002"]
+    wf = inp.waterfall
+    gap, alloc = wf.steps[3].gap, wf.steps[3].monthly_suggested
+    cushion = inp.candidates["build_full_cushion"].facts
+    assert cushion["months_to_target"] == math.ceil(gap / alloc) == 11
+    text = advisor.template_move("build_full_cushion", cushion)[1]
+    assert "about 11 months if all your monthly surplus goes to it" in text
+    mt = advisor.move_text("build_full_cushion", cushion)
+    assert mt.ph["cushion_target_months"] == "11 months" and mt.values["cushion_target_months"] == 11
+    # the later moves do not get one; step 3's is a floor (no interest) and is not worded
+    assert "months_to_target" not in inp.candidates["increase_retirement"].facts
+    assert inputs["C067"][0].candidates["pay_card_high_apr"].facts["months_to_target"] == math.ceil(14500 / 755.67)
+    assert "1 month" == advisor.months(1) and "2 months" == advisor.months(2)
+
+
+def test_no_months_to_target_without_a_surplus_to_allocate():
+    from app.formulas import rules
+    from test_rules import checking, make
+    moves = {m.move_code: m for m in rules.candidate_moves(make([checking(200.0)], surplus=0.0)).moves}
+    assert "months_to_target" not in moves["build_starter_cushion"].facts
+
+
+@pytest.mark.parametrize("cid,amount,state", [("C002", 544.61, "ended"), ("C059", 610.17, "ending")])
+def test_a_freed_payment_is_folded_into_the_pinned_move_on_step_3_or_4(cid, amount, state, inputs, monkeypatch):
+    from app.formulas import rules
+    inp, facts = inputs[cid]
+    assert inp.folded == ["recently_freed_payment"] and "recently_freed_payment" not in inp.candidates
+    assert "recently_freed_payment" in {m.move_code for m in inp.moves.moves}                         # the rules still list it (section 5)
+    pinned = advisor.pinned_code(inp)
+    pf = inp.candidates[pinned].facts
+    assert pf["freed_amount"] == amount and pf["freed_state"] == state and pf["freed_date"]
+    text = advisor.template_move(pinned, pf)[1]
+    assert f"${amount:,.0f} a month that frees up when a loan payment {'ended' if state == 'ended' else 'ends'} on " in text
+    assert advisor.move_text(pinned, pf).values["freed_amount"] == amount
+    advice = run(inp, facts, Model(examples), monkeypatch)
+    assert advice.source == "model" and "recently_freed_payment" not in {m.move_code for m in advice.moves}
+    assert f"${amount:,.0f} a month" in advice.moves[0].why_text and advice.diagnostics.first_try_ok
+    assert_grounded(advice, inp)
+    # the model must mention it: leaving it out is rejected
+    leave = ans(example_of(inp, pinned).split(";")[0] + ".")
+    model = Model(leave)
+    r2 = run(inp, facts, model, monkeypatch)
+    assert "freed_not_mentioned" in r2.diagnostics.first_reasons and r2.moves[0].source == "template" and f"${amount:,.0f}" in r2.moves[0].why_text
+
+
+def test_a_freed_payment_is_not_folded_on_other_steps_or_without_an_amount(inputs):
+    inp, facts = inputs["C002"]
+    moves = {m.move_code: m for m in inp.moves.moves if m.move_code in advisor.SPECS}
+    step5 = advisor.Inputs(inp.waterfall.model_copy(update={"current_step": 5}), inp.moves, inp.verdict, dict(moves), inp.labels)
+    advisor._fold_freed_payment(step5)
+    assert "recently_freed_payment" in step5.candidates and step5.folded == []
+    no_amount = moves["recently_freed_payment"].model_copy(update={"facts": {"freed": [{"account_id": "X", "ends": "2026-12-01", "state": "ended", "monthly_amount": None}]}})
+    step4 = advisor.Inputs(inp.waterfall, inp.moves, inp.verdict, {**moves, "recently_freed_payment": no_amount}, inp.labels)
+    advisor._fold_freed_payment(step4)
+    assert "recently_freed_payment" in step4.candidates and step4.folded == []
+
+
+def test_freed_payments_carry_their_monthly_amount(profiles):
+    from app.formulas import rules
+    for cid, amount in (("C002", 544.61), ("C059", 610.17)):
+        m = next(m for m in rules.candidate_moves(profiles[cid]).moves if m.move_code == "recently_freed_payment")
+        assert m.facts["freed"][0]["monthly_amount"] == amount
+
+
+def test_start_credit_building_says_secured_card_below_the_threshold(inputs, profiles, monkeypatch):
+    import json
+    from app.config import assumptions
+    from app.formulas import rules
+    a = assumptions()["secured_card_score_max"]
+    assert a["value"] == 580 and len(a["source"]) > 40 and a["as_of"]
+    inp, facts = inputs["C002"]                                          # score 533
+    f = inp.candidates["start_credit_building"].facts
+    assert f["credit_score"] < 580 and f["secured_card"] is True
+    assert "a secured card" in advisor.template_move("start_credit_building", f)[1]
+    assert "a secured card" in advisor.model_view(inp, facts)
+    above = {**f, "secured_card": False, "credit_score": 598}              # C059-like: above the threshold, 620 is the other threshold
+    assert "secured" not in advisor.template_move("start_credit_building", above)[1]
+    assert inputs["C059"][0].candidates["start_credit_building"].facts["secured_card"] is False
+    # the model must keep it
+    skip = ans(example_of(inp, "build_full_cushion"), ("start_credit_building", "With a credit score of {credit_score}, one card used lightly can help build it."))
+    advice = run(inp, facts, Model(skip), monkeypatch)
+    assert "missing_secured_card" in advice.diagnostics.first_reasons
+    assert "secured card" in next(m for m in advice.moves if m.move_code == "start_credit_building").why_text
+    # the threshold is read from assumptions.json, not fixed in code
+    monkeypatch.setattr(rules, "thresholds", lambda: {**{k: v["value"] for k, v in assumptions().items()}, "secured_card_score_max": 500})
+    assert rules.candidate_moves(profiles["C002"]).moves and next(
+        m for m in rules.candidate_moves(profiles["C002"]).moves if m.move_code == "start_credit_building").facts["secured_card"] is False

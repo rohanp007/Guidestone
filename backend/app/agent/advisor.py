@@ -97,7 +97,7 @@ def pct(x: float) -> str:
 
 
 def months(x: float) -> str:
-    return f"{int(x)} months"
+    return f"{int(x)} month{'' if int(x) == 1 else 's'}"
 
 
 def day(iso: str) -> str:
@@ -124,6 +124,7 @@ class Spec:
     title: str                                       # fixed, sentence case; the model never writes titles
     why: str | Callable[[dict], str]                 # the default sentence (also the model's example)
     variants: tuple[tuple[Callable[[dict], bool], str], ...] = ()      # (when, sentence) tried first: a zero figure that would read badly
+    later: Callable[[dict], str] | None = None       # the sentence when this move is for a LATER waterfall step ("Once {once}, ...")
 
 
 SPECS: dict[str, Spec] = {
@@ -140,25 +141,29 @@ SPECS: dict[str, Spec] = {
          P("starter_cushion_gap", lambda f: f["gap"], usd, "how much more is needed")),
         "Build a starter cushion",
         "You have {starter_cushion_now} in cash against a starter fund of {starter_cushion_target}; adding {starter_cushion_gap} gets you there.",
-        ((lambda f: f["liquid"] < ZERO, "You have no cash set aside yet; building a starter fund of {starter_cushion_target} is the first goal."),)),
+        ((lambda f: f["liquid"] < ZERO, "You have no cash set aside yet; building a starter fund of {starter_cushion_target} is the first goal."),
+         (lambda f: "months_to_target" in f, "You have {starter_cushion_now} in cash against a starter fund of {starter_cushion_target}; adding {starter_cushion_gap} gets you there in about {starter_target_months} if all your monthly surplus goes to it."))),
     "confirm_401k_match": Spec(
         "The customer's employer offers a 401(k) match, and we cannot see whether they get all of it.",
         (P("match_pct", lambda f: f["employer_match_pct"], pct, "share of pay the employer matches"),
          P("match_monthly", lambda f: f["monthly_to_get_match"], usd, "what the full match is worth each month")),
         "Confirm your 401(k) match",
-        "Your employer matches up to {match_pct} of your pay, worth about {match_monthly} a month, so check that you contribute enough to get all of it."),
+        "Your employer matches up to {match_pct} of your pay, worth about {match_monthly} a month, so check that you contribute enough to get all of it.",
+        later=lambda f: "Once {once}, check that you contribute enough to get your employer's match of {match_pct} of your pay, worth about {match_monthly} a month."),
     "pay_card_high_apr": Spec(
         "A credit card charges high interest, more than savings can earn.",
         (P("card_balance", lambda f: f["total_balance"], usd, "balance owed on high-interest cards"),
          P("card_apr", lambda f: f["highest_apr"], pct, "the highest yearly interest rate")),
         "Pay down your high-interest card",
-        "Your card balance of {card_balance} costs {card_apr} a year in interest, so extra money goes here before other goals."),
+        "Your card balance of {card_balance} costs {card_apr} a year in interest, so extra money goes here before other goals.",
+        later=lambda f: "Once {once}, put extra money toward your card balance of {card_balance}, which costs {card_apr} a year in interest."),
     "pay_loan_high_apr": Spec(
         "A loan charges high interest, more than savings can earn.",
         (P("loan_balance", lambda f: f["total_balance"], usd, "balance owed on high-interest loans"),
          P("loan_apr", lambda f: f["highest_apr"], pct, "the highest yearly interest rate")),
         "Pay down your high-interest loan",
-        "Your loan balance of {loan_balance} costs {loan_apr} a year in interest, so extra money goes here before other goals."),
+        "Your loan balance of {loan_balance} costs {loan_apr} a year in interest, so extra money goes here before other goals.",
+        later=lambda f: "Once {once}, put extra money toward your loan balance of {loan_balance}, which costs {loan_apr} a year in interest."),
     "build_full_cushion": Spec(
         "Cash on hand is below a full emergency cushion.",
         (P("cushion_now", lambda f: f["liquid"], usd, "cash on hand today"),
@@ -167,7 +172,10 @@ SPECS: dict[str, Spec] = {
          P("cushion_months", lambda f: f["months"], months, "how many months of essentials the cushion covers, with the unit")),
         "Build your full emergency cushion",
         "You have {cushion_now} in cash against a full cushion of {cushion_target} ({cushion_months} of essentials), so {cushion_gap} more is needed.",
-        ((lambda f: f["liquid"] < ZERO, "You have no cash set aside yet; a full cushion of {cushion_target} ({cushion_months} of essentials) is the goal."),)),
+        ((lambda f: f["liquid"] < ZERO, "You have no cash set aside yet; a full cushion of {cushion_target} ({cushion_months} of essentials) is the goal."),
+         (lambda f: "months_to_target" in f, "You have {cushion_now} in cash against a full cushion of {cushion_target} ({cushion_months} of essentials); {cushion_gap} more would take about {cushion_target_months} if all your monthly surplus goes to it.")),
+        lambda f: ("Once {once}, start building a full cushion of {cushion_target} ({cushion_months} of essentials)." if f["liquid"] < ZERO else
+                   "Once {once}, build your cash from {cushion_now} up to a full cushion of {cushion_target} ({cushion_months} of essentials).")),
     "increase_retirement": Spec(
         "Retirement saving is below the usual target share of pay.",
         (P("retirement_monthly_now", lambda f: f["current_monthly"], usd, "retirement saving each month today"),
@@ -175,17 +183,21 @@ SPECS: dict[str, Spec] = {
          P("retirement_monthly_gap", lambda f: f["gap_monthly"], usd, "how much more each month")),
         "Save more for retirement",
         "You save about {retirement_monthly_now} a month toward retirement against a target of {retirement_monthly_target}, so {retirement_monthly_gap} more a month closes the gap.",
-        ((lambda f: f["current_monthly"] < ZERO, "You aren't saving for retirement yet; aiming for about {retirement_monthly_target} a month would get you to the target."),)),
+        ((lambda f: f["current_monthly"] < ZERO, "You aren't saving for retirement yet; aiming for about {retirement_monthly_target} a month would get you to the target."),),
+        lambda f: ("Once {once}, start saving for retirement: aim for about {retirement_monthly_target} a month." if f["current_monthly"] < ZERO else
+                   "Once {once}, raise your retirement saving from about {retirement_monthly_now} a month toward {retirement_monthly_target}.")),
     "start_education_savings": Spec(
         "The customer has children under 18 and the earlier goals are under way. Retirement saving comes first.",
         (),
         "Start saving for education",
-        "Retirement saving comes first; once that is covered, start setting money aside for your children's education."),
+        "Retirement saving comes first; once that is covered, start setting money aside for your children's education.",
+        later=lambda f: "Once {once}, start setting money aside for your children's education; retirement saving comes first."),
     "start_credit_building": Spec(
         "The credit score is low and there is no open credit card.",
         (P("credit_score", lambda f: f["credit_score"], plain, "the current credit score"),),
         "Start building your credit",
-        "With a credit score of {credit_score}, one card used lightly and paid in full each month can help build it."),
+        "With a credit score of {credit_score}, one card used lightly and paid in full each month can help build it.",
+        ((lambda f: f.get("secured_card", False), "With a credit score of {credit_score}, a secured card (backed by a deposit you put down) used lightly and paid in full each month can help build it."),)),
     "move_idle_cash_to_hys": Spec(
         "More cash is sitting in everyday accounts than needed.",
         (P("cash_total", lambda f: f["liquid"], usd, "total cash in checking and savings"),
@@ -231,6 +243,22 @@ def tidy(text: str) -> str:
     return _COUNT_UNIT.sub(r"\1", text)
 
 
+# placeholders that exist only when the facts carry them: (move codes or None for any, when, placeholder)
+OPTIONAL: tuple[tuple[tuple[str, ...] | None, Callable[[dict], bool], P], ...] = (
+    (("build_full_cushion",), lambda f: "months_to_target" in f,
+     P("cushion_target_months", lambda f: f["months_to_target"], months, "how long the gap takes if all the monthly surplus goes to it, with the unit")),
+    (("build_starter_cushion",), lambda f: "months_to_target" in f,
+     P("starter_target_months", lambda f: f["months_to_target"], months, "how long the gap takes if all the monthly surplus goes to it, with the unit")),
+    (None, lambda f: "freed_amount" in f, P("freed_amount", lambda f: f["freed_amount"], usd, "the monthly payment that frees up when a loan payment ends")),
+    (None, lambda f: "freed_amount" in f, P("freed_date", lambda f: f["freed_date"], day, "the date that loan payment ended or ends")),
+)
+
+# what "Once ..." completes, by the step the customer is on now (after_step); "gap" = spending is above income
+ONCE = {"gap": "your monthly spending is covered", 1: "your starter cushion is in place", 2: "you have your full employer match",
+        3: "your high-interest debt is paid off", 4: "your emergency cushion is full", 5: "your retirement saving reaches its target",
+        6: "education saving is under way"}
+
+
 @dataclass
 class MoveText:
     code: str
@@ -242,19 +270,24 @@ class MoveText:
 def move_text(code: str, facts: dict) -> MoveText:
     spec = SPECS[code]
     ph, values = {}, {}
-    for p in spec.ph:
+    extra = tuple(p for codes, when, p in OPTIONAL if (codes is None or code in codes) and when(facts))
+    for p in (*spec.ph, *extra):
         raw = p.get(facts)
         ph[p.name], values[p.name] = p.fmt(raw), raw
-    return MoveText(code, ph, values, {p.name: p.means for p in spec.ph})
+    return MoveText(code, ph, values, {p.name: p.means for p in (*spec.ph, *extra)})
 
 
 def sentence(code: str, facts: dict) -> str:
     """The move's sentence with placeholders still in it, chosen in code: a zero-figure variant when one applies, else the default."""
     spec = SPECS[code]
-    for when, text in spec.variants:
-        if when(facts):
-            return text
-    return spec.why(facts) if callable(spec.why) else spec.why
+    if "after_step" in facts and spec.later is not None:               # a move for a later step: "Once your cushion is full, ..."
+        text = spec.later(facts).replace("{once}", ONCE[facts["after_step"]])
+    else:
+        text = next((t for when, t in spec.variants if when(facts)), None) or (spec.why(facts) if callable(spec.why) else spec.why)
+    if "freed_amount" in facts:                                          # a freed payment folded into the pinned move
+        verb = "ended on" if facts.get("freed_state") == "ended" else "ends on"
+        text = text.rstrip(".") + f"; the {{freed_amount}} a month that frees up when a loan payment {verb} {{freed_date}} can go straight to it."
+    return text
 
 
 def template_move(code: str, facts: dict) -> tuple[str, str]:
@@ -273,6 +306,7 @@ class Inputs:
     verdict: str
     candidates: dict[str, rules.CandidateMove]       # unique by move_code, in waterfall order (the first of each code wins)
     labels: dict[str, str]                           # the forecast labels, for the wording checks
+    folded: list[str] = field(default_factory=list)  # candidates merged into the pinned move instead of ranked separately
 
 
 def prepare(profile: Profile, facts: dict) -> Inputs:
@@ -285,7 +319,25 @@ def prepare(profile: Profile, facts: dict) -> Inputs:
         if m.move_code in SPECS:
             candidates.setdefault(m.move_code, m)
     labels = {k: facts[k] for k in ("cushion_status", "trend", "overdraft_status", "overall_status") if k in facts}
-    return Inputs(wf, moves, v, candidates, labels)
+    inp = Inputs(wf, moves, v, candidates, labels)
+    _fold_freed_payment(inp)
+    return inp
+
+
+def _fold_freed_payment(inp: Inputs) -> None:
+    """On step 3 or 4, a payment that has just freed up (or is about to) belongs in the sentence about the current step, where it can
+    speed that step up, not as a separate move that competes with it. Only when its monthly amount is known."""
+    freed, pinned = inp.candidates.get("recently_freed_payment"), pinned_code(inp)
+    if freed is None or pinned is None or inp.waterfall.current_step not in (3, 4):
+        return
+    known = [e for e in freed.facts["freed"] if e.get("monthly_amount")]
+    if not known:
+        return
+    inp.candidates[pinned] = inp.candidates[pinned].model_copy(update={"facts": {
+        **inp.candidates[pinned].facts, "freed_amount": round(sum(e["monthly_amount"] for e in known), 2),
+        "freed_date": known[0]["ends"], "freed_state": known[0]["state"]}})
+    del inp.candidates["recently_freed_payment"]
+    inp.folded.append("recently_freed_payment")
 
 
 # ---- the model's view ----------------------------------------------------------------------------------------------------------
@@ -325,17 +377,18 @@ class Checked:
     report: grounding.GroundingReport
     no_figures: bool = False           # the sentence should show a figure and uses none of the move's placeholders
     zero_figure: bool = False          # the filled sentence states a zero amount ("$0")
+    missing: list[str] = field(default_factory=list)   # required wording absent: missing_once, missing_secured_card, freed_not_mentioned
 
     @property
     def ok(self) -> bool:
-        return self.report.ok and not self.no_figures and not self.zero_figure
+        return self.report.ok and not self.no_figures and not self.zero_figure and not self.missing
 
     @property
     def reasons(self) -> list[str]:
         """Why it failed, as codes only (never text): figure_not_in_facts, judgment, style, contradicts_<label>, no_placeholder, zero_figure."""
         out = ["figure_not_in_facts"] if self.report.unmatched else []
         out += [c.field if c.field in ("judgment", "style") else f"contradicts_{c.field}" for c in self.report.conflicts]
-        out += ["no_placeholder"] * self.no_figures + ["zero_figure"] * self.zero_figure
+        out += ["no_placeholder"] * self.no_figures + ["zero_figure"] * self.zero_figure + self.missing
         return list(dict.fromkeys(out))
 
 
@@ -355,7 +408,11 @@ def check_move(m: AdvisorMove, inp: Inputs) -> Checked:
     report = grounding.check(filled.why_text, facts, judgments=True, style=True, hints=False)
     wants_figures = "{" in sentence(m.move_code, move.facts)                       # a zero variant may have none to show
     unused = wants_figures and not any("{" + k + "}" in m.why_text for k in mt.ph)
-    return Checked(filled, report, unused, bool(ZERO_FIGURE.search(filled.why_text)))
+    missing = [reason for reason, ok in (
+        ("missing_once", "after_step" not in move.facts or bool(re.search(r"\bonce\b", filled.why_text, re.I))),
+        ("missing_secured_card", not move.facts.get("secured_card") or "secured card" in filled.why_text.lower()),
+        ("freed_not_mentioned", "freed_amount" not in move.facts or "{freed_amount}" in m.why_text)) if not ok]
+    return Checked(filled, report, unused, bool(ZERO_FIGURE.search(filled.why_text)), missing)
 
 
 def pinned_code(inp: Inputs) -> str | None:
@@ -389,6 +446,8 @@ def _complaint(invalid: list[str], bad: list[Checked], inp: Inputs, missing: lis
             bits.append("it uses none of its {placeholders}; adapt the example sentence and keep its placeholders")
         if c.zero_figure:
             bits.append("it states a zero amount; use the wording of the example sentence")
+        if c.missing:
+            bits.append("it must keep the wording of the example sentence for: " + ", ".join(x.replace("_", " ") for x in c.missing))
         if any(x.field == "style" for x in r.conflicts):
             bits.append("not plain English; use only the listed {placeholders}: " + "; ".join(f'"{x.phrase}"' for x in r.conflicts if x.field == "style"))
         parts.append(f"For {c.move.move_code}: " + "; ".join(bits) + ".")
