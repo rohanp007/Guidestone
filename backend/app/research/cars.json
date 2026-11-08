@@ -1,0 +1,443 @@
+{
+  "generated_at": "2026-11-08",
+  "note": "Every figure with illustrative=false has a fetched url and a snippet copied from that page. Nulls say why. Fetched 2026-11-08.",
+  "vehicles": [
+    {
+      "id": "toyota_rav4",
+      "segment": "compact_suv",
+      "name": "Toyota RAV4",
+      "model_year": 2026,
+      "msrp": {
+        "value": null,
+        "unit": "usd",
+        "source_title": null,
+        "url": null,
+        "fetched_at": "2026-11-08",
+        "snippet": null,
+        "model_year": null,
+        "illustrative": true,
+        "note": "toyota.com/rav4 returned 403 to the fetch; Toyota's official pricing PDF (pressroom.toyota.com) also returned 403; the pressroom RAV4 pages fetched carry no price. Not filled from memory."
+      },
+      "mpg_combined": {
+        "value": 43,
+        "unit": "mpg",
+        "source_title": "FuelEconomy.gov (EPA) vehicle record 50285: 2026 Toyota RAV4",
+        "url": "https://www.fueleconomy.gov/ws/rest/vehicle/50285",
+        "fetched_at": "2026-11-08",
+        "snippet": "<comb08>43</comb08>",
+        "model_year": 2026,
+        "illustrative": false,
+        "note": "EPA combined MPG for the 2026 Toyota RAV4 (hybrid). The page is the EPA web-service record, which has no title."
+      },
+      "nhtsa_stars": {
+        "value": 5,
+        "unit": "stars",
+        "source_title": "NHTSA Safety Ratings API, vehicle 20261: 2025 Toyota RAV4 SUV AWD",
+        "url": "https://api.nhtsa.gov/SafetyRatings/VehicleId/20261",
+        "fetched_at": "2026-11-08",
+        "snippet": "\"OverallRating\":\"5\"",
+        "model_year": 2025,
+        "illustrative": false,
+        "note": "NHTSA overall rating of the 2025 Toyota RAV4 SUV AWD, the model year used for this vehicle."
+      },
+      "iihs_award": {
+        "value": null,
+        "unit": "award",
+        "source_title": "Top Safety Picks | IIHS",
+        "url": "https://www.iihs.org/ratings/top-safety-picks",
+        "fetched_at": "2026-11-08",
+        "snippet": null,
+        "model_year": null,
+        "illustrative": true,
+        "note": "Not listed among the 2026 award winners on the IIHS Top Safety Picks page fetched (no 2026 award found for this model). No vehicle page was fetched, so no rating is recorded."
+      }
+    },
+    {
+      "id": "honda_crv",
+      "segment": "compact_suv",
+      "name": "Honda CR-V",
+      "model_year": 2026,
+      "msrp": {
+        "value": 30920,
+        "unit": "usd",
+        "source_title": "Rugged, Electrified and Refreshed: Best-Selling Honda CR-V Gains New TrailSport Hybrid Trim and More Standard Tech as 2026 Lineup Arriving in Dealers Now (Honda Newsroom)",
+        "url": "https://hondanews.com/en-US/honda-automobiles/releases/release-0d29cf91ab5515b985a1c286910cc6fb-rugged-electrified-and-refreshed-best-selling-honda-cr-v-gains-new-trailsport-hybrid-trim-and-more-standard-tech-as-2026-lineup-arriving-in-dealers-now",
+        "fetched_at": "2026-11-08",
+        "snippet": "Pricing of 2026 Honda CR-V starts at $30,920, MSRP",
+        "model_year": 2026,
+        "illustrative": false,
+        "note": "Starting MSRP of the 2026 CR-V LX 2WD, excluding the $1,395 destination charge."
+      },
+      "mpg_combined": {
+        "value": 30,
+        "unit": "mpg",
+        "source_title": "FuelEconomy.gov (EPA) vehicle record 49352: 2026 Honda CR-V FWD, 1.5 L turbo",
+        "url": "https://www.fueleconomy.gov/ws/rest/vehicle/49352",
+        "fetched_at": "2026-11-08",
+        "snippet": "<comb08>30</comb08>",
+        "model_year": 2026,
+        "illustrative": false,
+        "note": "EPA combined MPG for the 2026 Honda CR-V FWD, 1.5 L turbo. The page is the EPA web-service record, which has no title."
+      },
+      "nhtsa_stars": {
+        "value": 5,
+        "unit": "stars",
+        "source_title": "NHTSA Safety Ratings API, vehicle 22661: 2027 HONDA CR-V SUV ICE FWD",
+        "url": "https://api.nhtsa.gov/SafetyRatings/VehicleId/22661",
+        "fetched_at": "2026-11-08",
+        "snippet": "\"OverallRating\":\"5\"",
+        "model_year": 2027,
+        "illustrative": false,
+        "note": "NHTSA overall rating of the 2027 HONDA CR-V SUV ICE FWD, the model year used for this vehicle."
+      },
+      "iihs_award": {
+        "value": null,
+        "unit": "award",
+        "source_title": "Top Safety Picks | IIHS",
+        "url": "https://www.iihs.org/ratings/top-safety-picks",
+        "fetched_at": "2026-11-08",
+        "snippet": null,
+        "model_year": null,
+        "illustrative": true,
+        "note": "Not listed among the 2026 award winners on the IIHS Top Safety Picks page fetched (no 2026 award found for this model). No vehicle page was fetched, so no rating is recorded."
+      }
+    },
+    {
+      "id": "mazda_cx5",
+      "segment": "compact_suv",
+      "name": "Mazda CX-5",
+      "model_year": 2027,
+      "msrp": {
+        "value": 29990,
+        "unit": "usd",
+        "source_title": "2027 Mazda CX-5 Crossover SUV | Mazda USA",
+        "url": "https://www.mazdausa.com/vehicles/cx-5",
+        "fetched_at": "2026-11-08",
+        "snippet": "Starting At $29,990",
+        "model_year": 2027,
+        "illustrative": false,
+        "note": "Starting price shown on Mazda USA's 2027 CX-5 page; destination not stated in the snippet."
+      },
+      "mpg_combined": {
+        "value": 26,
+        "unit": "mpg",
+        "source_title": "FuelEconomy.gov (EPA) vehicle record 50290: 2026 Mazda CX-5 4WD, 2.5 L",
+        "url": "https://www.fueleconomy.gov/ws/rest/vehicle/50290",
+        "fetched_at": "2026-11-08",
+        "snippet": "<comb08>26</comb08>",
+        "model_year": 2026,
+        "illustrative": false,
+        "note": "EPA combined MPG for the 2026 Mazda CX-5 4WD, 2.5 L. The page is the EPA web-service record, which has no title."
+      },
+      "nhtsa_stars": {
+        "value": null,
+        "unit": "stars",
+        "source_title": "NHTSA Safety Ratings API, vehicle 23019: 2026 MAZDA CX-5 SUV ICE AWD",
+        "url": "https://api.nhtsa.gov/SafetyRatings/VehicleId/23019",
+        "fetched_at": "2026-11-08",
+        "snippet": "\"OverallRating\":\"Not Rated\"",
+        "model_year": 2026,
+        "illustrative": true,
+        "note": "NHTSA lists the 2026 MAZDA CX-5 SUV ICE AWD as 'Not Rated' so there is no star figure."
+      },
+      "iihs_award": {
+        "value": "Top Safety Pick+",
+        "unit": "award",
+        "source_title": "2026 Mazda CX-5 (IIHS vehicle rating)",
+        "url": "https://www.iihs.org/ratings/vehicle/mazda/cx-5-4-door-suv/2026",
+        "fetched_at": "2026-11-08",
+        "snippet": "2026 Mazda CX-5 4-door SUV Top Safety Pick +",
+        "model_year": 2026,
+        "illustrative": false,
+        "note": "IIHS award for the 2026 Mazda CX-5 4-door SUV."
+      }
+    },
+    {
+      "id": "toyota_camry",
+      "segment": "midsize_sedan",
+      "name": "Toyota Camry",
+      "model_year": 2026,
+      "msrp": {
+        "value": null,
+        "unit": "usd",
+        "source_title": null,
+        "url": null,
+        "fetched_at": "2026-11-08",
+        "snippet": null,
+        "model_year": null,
+        "illustrative": true,
+        "note": "toyota.com/camry returned 403 to the fetch; Toyota's official pricing PDF also returned 403; the pressroom Camry page fetched carries no price. Not filled from memory."
+      },
+      "mpg_combined": {
+        "value": 51,
+        "unit": "mpg",
+        "source_title": "FuelEconomy.gov (EPA) vehicle record 49823: 2026 Toyota Camry HEV FF LE",
+        "url": "https://www.fueleconomy.gov/ws/rest/vehicle/49823",
+        "fetched_at": "2026-11-08",
+        "snippet": "<comb08>51</comb08>",
+        "model_year": 2026,
+        "illustrative": false,
+        "note": "EPA combined MPG for the 2026 Toyota Camry HEV FF LE (hybrid). The page is the EPA web-service record, which has no title."
+      },
+      "nhtsa_stars": {
+        "value": 5,
+        "unit": "stars",
+        "source_title": "NHTSA Safety Ratings API, vehicle 19427: 2024 Toyota CAMRY 4 DR AWD",
+        "url": "https://api.nhtsa.gov/SafetyRatings/VehicleId/19427",
+        "fetched_at": "2026-11-08",
+        "snippet": "\"OverallRating\":\"5\"",
+        "model_year": 2024,
+        "illustrative": false,
+        "note": "NHTSA overall rating of the 2024 Toyota CAMRY 4 DR AWD, the model year used for this vehicle."
+      },
+      "iihs_award": {
+        "value": "Top Safety Pick+",
+        "unit": "award",
+        "source_title": "2026 Toyota Camry (IIHS vehicle rating)",
+        "url": "https://www.iihs.org/ratings/vehicle/toyota/camry-4-door-sedan/2026",
+        "fetched_at": "2026-11-08",
+        "snippet": "2026 Toyota Camry 4-door sedan Top Safety Pick +",
+        "model_year": 2026,
+        "illustrative": false,
+        "note": "IIHS award for the 2026 Toyota Camry 4-door sedan."
+      }
+    },
+    {
+      "id": "honda_accord",
+      "segment": "midsize_sedan",
+      "name": "Honda Accord",
+      "model_year": 2026,
+      "msrp": {
+        "value": 28395,
+        "unit": "usd",
+        "source_title": "2026 Honda Accord Adds More Standard Tech and Sportier Styling; Now Arriving at Dealers (Honda Newsroom)",
+        "url": "https://hondanews.com/en-US/honda-automobiles/releases/release-c26685400737027f7d053958c30909ed-2026-honda-accord-adds-more-standard-tech-and-sportier-styling-now-arriving-at-dealers",
+        "fetched_at": "2026-11-08",
+        "snippet": "Pricing starts at $28,395 1 (MSRP) for the well-equipped Accord LX",
+        "model_year": 2026,
+        "illustrative": false,
+        "note": "Starting MSRP of the 2026 Accord LX, excluding the $1,195 destination charge."
+      },
+      "mpg_combined": {
+        "value": 32,
+        "unit": "mpg",
+        "source_title": "FuelEconomy.gov (EPA) vehicle record 50070: 2026 Honda Accord, 1.5 L turbo",
+        "url": "https://www.fueleconomy.gov/ws/rest/vehicle/50070",
+        "fetched_at": "2026-11-08",
+        "snippet": "<comb08>32</comb08>",
+        "model_year": 2026,
+        "illustrative": false,
+        "note": "EPA combined MPG for the 2026 Honda Accord, 1.5 L turbo. The page is the EPA web-service record, which has no title."
+      },
+      "nhtsa_stars": {
+        "value": 5,
+        "unit": "stars",
+        "source_title": "NHTSA Safety Ratings API, vehicle 16835: 2022 Honda ACCORD 4 DR FWD",
+        "url": "https://api.nhtsa.gov/SafetyRatings/VehicleId/16835",
+        "fetched_at": "2026-11-08",
+        "snippet": "\"OverallRating\":\"5\"",
+        "model_year": 2022,
+        "illustrative": false,
+        "note": "NHTSA overall rating of the 2022 Honda ACCORD 4 DR FWD, the model year used for this vehicle."
+      },
+      "iihs_award": {
+        "value": "Top Safety Pick",
+        "unit": "award",
+        "source_title": "2026 Honda Accord (IIHS vehicle rating)",
+        "url": "https://www.iihs.org/ratings/vehicle/honda/accord-4-door-sedan/2026",
+        "fetched_at": "2026-11-08",
+        "snippet": "2026 Honda Accord 4-door sedan Top Safety Pick",
+        "model_year": 2026,
+        "illustrative": false,
+        "note": "IIHS award for the 2026 Honda Accord 4-door sedan."
+      }
+    },
+    {
+      "id": "hyundai_sonata",
+      "segment": "midsize_sedan",
+      "name": "Hyundai Sonata",
+      "model_year": 2026,
+      "msrp": {
+        "value": null,
+        "unit": "usd",
+        "source_title": null,
+        "url": null,
+        "fetched_at": "2026-11-08",
+        "snippet": null,
+        "model_year": null,
+        "illustrative": true,
+        "note": "hyundaiusa.com/us/en/vehicles/sonata (title '2027 Hyundai Sonata') and hyundainews.com returned only a script-rendered page shell with no price text. Not filled from memory."
+      },
+      "mpg_combined": {
+        "value": 29,
+        "unit": "mpg",
+        "source_title": "FuelEconomy.gov (EPA) vehicle record 49318: 2026 Hyundai Sonata FWD, 2.5 L",
+        "url": "https://www.fueleconomy.gov/ws/rest/vehicle/49318",
+        "fetched_at": "2026-11-08",
+        "snippet": "<comb08>29</comb08>",
+        "model_year": 2026,
+        "illustrative": false,
+        "note": "EPA combined MPG for the 2026 Hyundai Sonata FWD, 2.5 L. The page is the EPA web-service record, which has no title."
+      },
+      "nhtsa_stars": {
+        "value": 5,
+        "unit": "stars",
+        "source_title": "NHTSA Safety Ratings API, vehicle 22981: 2027 HYUNDAI SONATA 4 DR ICE FWD",
+        "url": "https://api.nhtsa.gov/SafetyRatings/VehicleId/22981",
+        "fetched_at": "2026-11-08",
+        "snippet": "\"OverallRating\":\"5\"",
+        "model_year": 2027,
+        "illustrative": false,
+        "note": "NHTSA overall rating of the 2027 HYUNDAI SONATA 4 DR ICE FWD, the model year used for this vehicle."
+      },
+      "iihs_award": {
+        "value": "Top Safety Pick+",
+        "unit": "award",
+        "source_title": "2026 Hyundai Sonata (IIHS vehicle rating)",
+        "url": "https://www.iihs.org/ratings/vehicle/hyundai/sonata-4-door-sedan/2026",
+        "fetched_at": "2026-11-08",
+        "snippet": "2026 Hyundai Sonata 4-door sedan Top Safety Pick +",
+        "model_year": 2026,
+        "illustrative": false,
+        "note": "IIHS award for the 2026 Hyundai Sonata 4-door sedan."
+      }
+    }
+  ],
+  "auto_apr_by_tier": [
+    {
+      "tier": "super_prime",
+      "score_min": 781,
+      "score_max": 850,
+      "apr_new": {
+        "value": 4.41,
+        "unit": "percent",
+        "source_title": "Average Auto Loan Interest Rates By Credit Score | Bankrate (data: Experian State of the Automotive Finance Market, Q2 2026)",
+        "url": "https://www.bankrate.com/loans/auto-loans/average-car-loan-interest-rates-by-credit-score/",
+        "fetched_at": "2026-11-08",
+        "snippet": "781 to 850 (super prime) 4.41% 6.29%",
+        "model_year": 2026,
+        "illustrative": false,
+        "note": "Bankrate's table of Experian Q2 2026 averages; Experian's own report PDF could not be read as text."
+      },
+      "apr_used": {
+        "value": 6.29,
+        "unit": "percent",
+        "source_title": "Average Auto Loan Interest Rates By Credit Score | Bankrate (data: Experian State of the Automotive Finance Market, Q2 2026)",
+        "url": "https://www.bankrate.com/loans/auto-loans/average-car-loan-interest-rates-by-credit-score/",
+        "fetched_at": "2026-11-08",
+        "snippet": "781 to 850 (super prime) 4.41% 6.29%",
+        "model_year": 2026,
+        "illustrative": false,
+        "note": "Bankrate's table of Experian Q2 2026 averages; Experian's own report PDF could not be read as text."
+      }
+    },
+    {
+      "tier": "prime",
+      "score_min": 661,
+      "score_max": 780,
+      "apr_new": {
+        "value": 6.15,
+        "unit": "percent",
+        "source_title": "Average Auto Loan Interest Rates By Credit Score | Bankrate (data: Experian State of the Automotive Finance Market, Q2 2026)",
+        "url": "https://www.bankrate.com/loans/auto-loans/average-car-loan-interest-rates-by-credit-score/",
+        "fetched_at": "2026-11-08",
+        "snippet": "661 to 780 (prime) 6.15% 8.81%",
+        "model_year": 2026,
+        "illustrative": false,
+        "note": "Bankrate's table of Experian Q2 2026 averages; Experian's own report PDF could not be read as text."
+      },
+      "apr_used": {
+        "value": 8.81,
+        "unit": "percent",
+        "source_title": "Average Auto Loan Interest Rates By Credit Score | Bankrate (data: Experian State of the Automotive Finance Market, Q2 2026)",
+        "url": "https://www.bankrate.com/loans/auto-loans/average-car-loan-interest-rates-by-credit-score/",
+        "fetched_at": "2026-11-08",
+        "snippet": "661 to 780 (prime) 6.15% 8.81%",
+        "model_year": 2026,
+        "illustrative": false,
+        "note": "Bankrate's table of Experian Q2 2026 averages; Experian's own report PDF could not be read as text."
+      }
+    },
+    {
+      "tier": "near_prime",
+      "score_min": 601,
+      "score_max": 660,
+      "apr_new": {
+        "value": 9.71,
+        "unit": "percent",
+        "source_title": "Average Auto Loan Interest Rates By Credit Score | Bankrate (data: Experian State of the Automotive Finance Market, Q2 2026)",
+        "url": "https://www.bankrate.com/loans/auto-loans/average-car-loan-interest-rates-by-credit-score/",
+        "fetched_at": "2026-11-08",
+        "snippet": "601 to 660 (near prime) 9.71% 13.93%",
+        "model_year": 2026,
+        "illustrative": false,
+        "note": "Bankrate's table of Experian Q2 2026 averages; Experian's own report PDF could not be read as text."
+      },
+      "apr_used": {
+        "value": 13.93,
+        "unit": "percent",
+        "source_title": "Average Auto Loan Interest Rates By Credit Score | Bankrate (data: Experian State of the Automotive Finance Market, Q2 2026)",
+        "url": "https://www.bankrate.com/loans/auto-loans/average-car-loan-interest-rates-by-credit-score/",
+        "fetched_at": "2026-11-08",
+        "snippet": "601 to 660 (near prime) 9.71% 13.93%",
+        "model_year": 2026,
+        "illustrative": false,
+        "note": "Bankrate's table of Experian Q2 2026 averages; Experian's own report PDF could not be read as text."
+      }
+    },
+    {
+      "tier": "subprime",
+      "score_min": 501,
+      "score_max": 600,
+      "apr_new": {
+        "value": 13.52,
+        "unit": "percent",
+        "source_title": "Average Auto Loan Interest Rates By Credit Score | Bankrate (data: Experian State of the Automotive Finance Market, Q2 2026)",
+        "url": "https://www.bankrate.com/loans/auto-loans/average-car-loan-interest-rates-by-credit-score/",
+        "fetched_at": "2026-11-08",
+        "snippet": "501 to 600 (subprime) 13.52% 19.10%",
+        "model_year": 2026,
+        "illustrative": false,
+        "note": "Bankrate's table of Experian Q2 2026 averages; Experian's own report PDF could not be read as text."
+      },
+      "apr_used": {
+        "value": 19.1,
+        "unit": "percent",
+        "source_title": "Average Auto Loan Interest Rates By Credit Score | Bankrate (data: Experian State of the Automotive Finance Market, Q2 2026)",
+        "url": "https://www.bankrate.com/loans/auto-loans/average-car-loan-interest-rates-by-credit-score/",
+        "fetched_at": "2026-11-08",
+        "snippet": "501 to 600 (subprime) 13.52% 19.10%",
+        "model_year": 2026,
+        "illustrative": false,
+        "note": "Bankrate's table of Experian Q2 2026 averages; Experian's own report PDF could not be read as text."
+      }
+    },
+    {
+      "tier": "deep_subprime",
+      "score_min": 300,
+      "score_max": 500,
+      "apr_new": {
+        "value": 16.11,
+        "unit": "percent",
+        "source_title": "Average Auto Loan Interest Rates By Credit Score | Bankrate (data: Experian State of the Automotive Finance Market, Q2 2026)",
+        "url": "https://www.bankrate.com/loans/auto-loans/average-car-loan-interest-rates-by-credit-score/",
+        "fetched_at": "2026-11-08",
+        "snippet": "300 to 500 (deep subprime) 16.11% 21.62%",
+        "model_year": 2026,
+        "illustrative": false,
+        "note": "Bankrate's table of Experian Q2 2026 averages; Experian's own report PDF could not be read as text."
+      },
+      "apr_used": {
+        "value": 21.62,
+        "unit": "percent",
+        "source_title": "Average Auto Loan Interest Rates By Credit Score | Bankrate (data: Experian State of the Automotive Finance Market, Q2 2026)",
+        "url": "https://www.bankrate.com/loans/auto-loans/average-car-loan-interest-rates-by-credit-score/",
+        "fetched_at": "2026-11-08",
+        "snippet": "300 to 500 (deep subprime) 16.11% 21.62%",
+        "model_year": 2026,
+        "illustrative": false,
+        "note": "Bankrate's table of Experian Q2 2026 averages; Experian's own report PDF could not be read as text."
+      }
+    }
+  ]
+}
