@@ -180,7 +180,7 @@ SPECS: dict[str, Spec] = {
         "The customer has children under 18 and the earlier goals are under way. Retirement saving comes first.",
         (),
         "Start saving for education",
-        "Retirement saving comes first; once it is on track, start setting money aside for your children's education."),
+        "Retirement saving comes first; once that is covered, start setting money aside for your children's education."),
     "start_credit_building": Spec(
         "The credit score is low and there is no open credit card.",
         (P("credit_score", lambda f: f["credit_score"], plain, "the current credit score"),),
@@ -219,7 +219,7 @@ SPECS: dict[str, Spec] = {
          P("automated_monthly", lambda f: f["automated_monthly"], usd, "what is already moved to savings automatically each month")),
         "Automate your savings",
         "About {monthly_surplus} a month is left over and only {automated_monthly} is moved to savings automatically; automating more makes saving happen first.",
-        ((lambda f: f["automated_monthly"] < ZERO, "About {monthly_surplus} a month is left over and none of it is moved to savings automatically; automating it makes saving happen first."),)),
+        ((lambda f: f["automated_monthly"] < ZERO, "About {monthly_surplus} a month is left over and nothing is moved to savings automatically; automating it makes saving happen first."),)),
 }
 
 # Which placeholders are percentages / counts / dates is carried by the name (see above); the grounding facts use these exact names.
@@ -495,6 +495,9 @@ async def _advise(inp: Inputs, facts: dict, tally: _Tally) -> Advice:
     if not inp.candidates:
         tally.first_ok = True
         return _assemble(inp, [], tally)
+    if list(inp.candidates) == [pinned_code(inp)]:                 # nothing to choose and the code already wrote the order: no model call
+        tally.first_ok = True
+        return template_advice(inp, tally, "single_move")
     messages = [{"role": "system", "content": ADVISOR_PROMPT}, {"role": "user", "content": model_view(inp, facts)}]
     ask = lambda msgs, **kw: client.complete("advisor", msgs, json_schema=AdvisorAnswer, max_tokens=ADVISOR_MAX_TOKENS, schema_in_prompt=False,
                                              response_schema=response_schema(inp), **kw)

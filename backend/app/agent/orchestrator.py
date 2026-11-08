@@ -25,9 +25,9 @@ from ..llm import client, grounding
 from ..llm.facts import forecast_facts, model_view, placeholders
 from ..llm.prompts import EXPLAIN_PROMPT
 from ..llm.tools import Tool, session_tool
-from . import advisor, cache
+from . import advisor, cache, payoff_advisor
 from .events import EventSpec, get_event
-from .models import MAX_STEPS, Advice, AnalysisResult, GroundingSummary, HeadlineSummary, Plan, PlanStep, TraceStep
+from .models import MAX_STEPS, Advice, AnalysisResult, PayoffAnalysis, GroundingSummary, HeadlineSummary, Plan, PlanStep, TraceStep
 from .prompts import ORCH_PLAN_V1, PROMPT_VERSION, TOOL_HINTS
 
 log = logging.getLogger("guidestone.agent")
@@ -55,6 +55,9 @@ class _State:
     summary: HeadlineSummary | None = None
     rules: advisor.Inputs | None = None                  # the decision rules' output (waterfall, candidate moves, verdict)
     advice: Advice | None = None
+    payoff: PayoffAnalysis | None = None
+    pf: payoff_advisor.PayoffFacts | None = None         # the payoff event's figures, once known (a timeout can still answer from them)
+    pf_parts: tuple | None = None                        # (summary, chosen strategy, verdict, simulation)
     degraded: bool = False
     llm_trace: list[dict] = field(default_factory=list)
 
@@ -238,7 +241,7 @@ async def advise(st: _State) -> None:
         detail = {"source": st.advice.source, "moves": len(st.advice.moves), "retried": d.retried, "first_try_ok": d.first_try_ok,
                   "template_moves": d.template_moves, "reasons": ",".join(d.final_reasons or d.first_reasons)[:39]}
         st.trace.append(TraceStep(kind="advise", name="advisor", ms=round((time.perf_counter() - t0) * 1000, 1), detail=detail))
-        if st.advice.source != "model":
+        if st.advice.source != "model" and d.first_reasons != ["single_move"]:      # a deliberate template, not a fallback
             st.degraded = True
     except Exception as e:                                  # the advisor must never take the dashboard down
         st.degraded = True
@@ -247,16 +250,68 @@ async def advise(st: _State) -> None:
                                   detail={"reason": type(e).__name__}))
 
 
+# ---- the payoff event ----------------------------------------------------------------------------------------------------------
+
+def _payoff_analysis(st: _State, summary, chosen, verdict, simulation, answer) -> PayoffAnalysis:
+    rec = summary.recommended
+    return PayoffAnalysis(verdict=verdict, recommended=rec, strategy_code=chosen.code if chosen else None,
+                          strategy_title=payoff_advisor.STRATEGY_TITLE[chosen.code] if chosen else None, extra_monthly=summary.extra_monthly,
+                          lump_sum=summary.lump_sum, safe_lump_sum=summary.safe_lump_sum, comparison=summary.strategies, simulation=simulation,
+                          answer=answer)
+
+
+async def _pipeline_payoff(st: _State) -> None:
+    """The fixed plan: payoff_strategies_summary, then simulate_payoff for the recommended strategy (or the caller's), then the answer.
+    No debt: a deterministic result and no model call."""
+    st.llm_trace = client.start_run()
+    given = {k: st.inputs[k] for k in ("extra_monthly", "lump_sum") if st.inputs.get(k) is not None}
+    tool = session_tool(st.profile, "payoff_strategies_summary")
+    summary, ok = await _timed(st, "precompute", "payoff_strategies_summary", tool.arun(given))
+    if not ok:
+        raise summary
+    st.compute["payoff_strategies_summary"] = to_plain(summary)
+    if summary.no_debt:
+        st.facts = {}
+        st.payoff = _payoff_analysis(st, summary, None, "no_debt", None, payoff_advisor.no_debt_answer())
+        return
+    code = st.inputs.get("strategy") or summary.recommended.code or "A"       # the recommendation is code's: payoff_priority
+    chosen = next(s for s in summary.strategies if s.code == code)
+    verdict = payoff_advisor.verdict_for(summary, chosen)
+    # the full result (schedule and month-end bands) is for the screen, not a model: so the registry, not an agent tool
+    formula = FORMULAS["simulate_payoff"]
+    sim_args = formula.args.model_validate({"strategy": code, **given}).model_dump()
+    simulation, ok = await _timed(st, "tool", "simulate_payoff",
+                                  asyncio.to_thread(formula.fn, st.profile, **{k: v for k, v in sim_args.items() if k != "order"}), strategy=code)
+    if not ok:
+        st.degraded, simulation = True, None
+    else:
+        st.compute["simulate_payoff"] = {"strategy": code, "months": chosen.months}       # the full schedule lives in the typed result
+    st.pf = payoff_advisor.facts_for(summary, chosen)
+    st.facts = dict(st.pf.values)
+    st.pf_parts = (summary, chosen, verdict, simulation)
+    t0 = time.perf_counter()
+    ans = await payoff_advisor.answer(summary, chosen, st.pf, verdict)
+    st.trace.append(TraceStep(kind="advise", name="advisor", ms=round((time.perf_counter() - t0) * 1000, 1),
+                              detail={"source": ans.source, "retried": ans.diagnostics.retried, "first_try_ok": ans.diagnostics.first_try_ok,
+                                      "reasons": ",".join(ans.diagnostics.final_reasons or ans.diagnostics.first_reasons)[:39]}))
+    if ans.source != "model":
+        st.degraded = True
+    st.payoff = _payoff_analysis(st, summary, chosen, verdict, simulation, ans)
+
+
 # ---- the run -------------------------------------------------------------------------------------------------------------------
 
 def _assemble(st: _State, data_version: str) -> AnalysisResult:
     return AnalysisResult(
         run_id=st.run_id, event=st.spec.name, feature=st.spec.feature, customer_id=st.profile.id, as_of=st.profile.as_of_date.isoformat(),
         prompt_version=PROMPT_VERSION, data_version=data_version, inputs=st.inputs, compute=st.compute, facts=st.facts or {},
-        status=(st.facts or {}).get("overall_status"), summary=st.summary, advice=st.advice, trace=st.trace, llm_trace=st.llm_trace, degraded=st.degraded)
+        status=st.payoff.verdict if st.payoff else (st.facts or {}).get("overall_status"), summary=st.summary, advice=st.advice,
+        payoff=st.payoff, trace=st.trace, llm_trace=st.llm_trace, degraded=st.degraded)
 
 
 async def _pipeline(st: _State) -> None:
+    if st.spec.pipeline == "payoff":
+        return await _pipeline_payoff(st)
     st.llm_trace = client.start_run()
     await precompute(st)
     st.facts = build_facts(st)
@@ -281,6 +336,14 @@ async def _execute(st: _State, data_version: str) -> AnalysisResult:
         async with asyncio.timeout(RUN_TIMEOUT_S):
             await _pipeline(st)
     except TimeoutError:
+        if st.spec.pipeline == "payoff":
+            if st.pf_parts is None:             # no figures yet: nothing to show
+                raise
+            summary, chosen, verdict, simulation = st.pf_parts
+            st.degraded = True
+            st.trace.append(TraceStep(kind="fallback", name="timeout", ok=False, detail={"limit_s": RUN_TIMEOUT_S}))
+            st.payoff = _payoff_analysis(st, summary, chosen, verdict, simulation, payoff_advisor.template_answer(verdict, st.pf, "run_timeout"))
+            return _assemble(st, data_version)
         if st.facts is None:                    # not even the precompute finished: nothing to show
             raise
         st.degraded = True
@@ -295,9 +358,11 @@ async def _execute(st: _State, data_version: str) -> AnalysisResult:
 
 
 def is_transient(result: AnalysisResult) -> bool:
-    """Advice served from the template because the advisor ran out of time, was unreachable, or the run hit its limit: temporary."""
-    a = result.advice
-    return bool(a and a.source == "template" and TRANSIENT_REASONS & set(a.diagnostics.first_reasons + a.diagnostics.final_reasons))
+    """Advice or an answer served from the template because the advisor ran out of time, was unreachable, or the run hit its limit: temporary."""
+    for part in (result.advice, result.payoff.answer if result.payoff else None):
+        if part and part.source == "template" and TRANSIENT_REASONS & set(part.diagnostics.first_reasons + part.diagnostics.final_reasons):
+            return True
+    return False
 
 
 async def _rerun(event: str, profile: Profile, params: dict) -> None:

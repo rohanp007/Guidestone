@@ -5,6 +5,9 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from ..engine.simulate import PayoffSimulation
+from ..formulas.payoff import Recommendation, StrategySummary
+
 MAX_STEPS = 4
 REASON_MAX = 80
 
@@ -89,6 +92,31 @@ class Advice(BaseModel):
     diagnostics: AdviceDiagnostics
 
 
+PayoffVerdict = Literal["pay_it_off", "pay_with_tradeoff", "keep_cash", "no_room", "no_debt"]
+
+
+class PayoffAnswer(BaseModel):
+    """Up to two sentences about the chosen plan. The model writes them; the verdict is not part of them."""
+    text: str
+    source: Literal["model", "template"]
+    grounding: GroundingSummary
+    diagnostics: AdviceDiagnostics
+
+
+class PayoffAnalysis(BaseModel):
+    """The simulate_payoff event's result: the answer to "should I pay it off?" and everything the Pay Off screen draws."""
+    verdict: PayoffVerdict                   # set by code from payoff_priority's recommendation and the chosen plan's warnings
+    recommended: Recommendation | None       # payoff_priority's pick (code, reason_code)
+    strategy_code: str | None                # the plan shown: the recommended one, unless the caller chose another
+    strategy_title: str | None               # a fixed plain phrase for it
+    extra_monthly: float                     # resolved
+    lump_sum: float                          # resolved
+    safe_lump_sum: float
+    comparison: list[StrategySummary]        # strategies A-E side by side: months, interest, saved, cushion effect, warnings
+    simulation: PayoffSimulation | None      # the chosen plan in full: schedule, and the cash forecast with and without it
+    answer: PayoffAnswer
+
+
 class AnalysisResult(BaseModel):
     run_id: str
     event: str
@@ -104,6 +132,7 @@ class AnalysisResult(BaseModel):
     summary: HeadlineSummary | None
     research: list[Any] = Field(default_factory=list)       # empty in v1
     advice: Advice | None = None
+    payoff: PayoffAnalysis | None = None                     # the simulate_payoff event
     trace: list[TraceStep]
     llm_trace: list[dict[str, Any]]          # the LLM client's per-run trace
     degraded: bool = False                   # a fallback was used somewhere

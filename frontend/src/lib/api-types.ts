@@ -435,6 +435,41 @@ export interface components {
             /** Addresses Current Step */
             addresses_current_step: boolean;
         };
+        /** Amortization */
+        Amortization: {
+            /** Months To Payoff */
+            months_to_payoff: number | null;
+            /** Payoff Date */
+            payoff_date: string | null;
+            /** Total Interest */
+            total_interest: number;
+            /** Total Paid */
+            total_paid: number;
+            /** Never Pays Off */
+            never_pays_off: boolean;
+            /** Hit Max Months */
+            hit_max_months: boolean;
+            /** Max Months */
+            max_months: number;
+            /** Extra Monthly */
+            extra_monthly: number;
+            /** Lump Sum */
+            lump_sum: number;
+            /** Lump Applied */
+            lump_applied: number;
+            /** Rollover */
+            rollover: boolean;
+            /** Order */
+            order: string[];
+            /** Lump Order */
+            lump_order: string[];
+            /** Per Debt */
+            per_debt: {
+                [key: string]: components["schemas"]["DebtPayoff"];
+            };
+            /** Schedule */
+            schedule: components["schemas"]["ScheduleRow"][];
+        };
         /** AnalysisResult */
         AnalysisResult: {
             /** Run Id */
@@ -469,6 +504,7 @@ export interface components {
             /** Research */
             research?: unknown[];
             advice?: components["schemas"]["Advice"] | null;
+            payoff?: components["schemas"]["PayoffAnalysis"] | null;
             /** Trace */
             trace: components["schemas"]["TraceStep"][];
             /** Llm Trace */
@@ -564,6 +600,34 @@ export interface components {
             monthly: number;
             /** Share */
             share: number;
+        };
+        /** CushionImpact */
+        CushionImpact: {
+            /** Cushion */
+            cushion: number;
+            /** Horizon Months */
+            horizon_months: number;
+            /** Paths */
+            paths: number;
+            baseline: components["schemas"]["SimSummary"];
+            scenario: components["schemas"]["SimSummary"];
+            diff: components["schemas"]["SimDiff"];
+        };
+        /** DebtPayoff */
+        DebtPayoff: {
+            /** Payoff Month */
+            payoff_month: number | null;
+            /** Payoff Date */
+            payoff_date: string | null;
+            /** Interest */
+            interest: number;
+            /** Paid */
+            paid: number;
+            /**
+             * Never Pays Off
+             * @default false
+             */
+            never_pays_off?: boolean;
         };
         /** DemoPersona */
         DemoPersona: {
@@ -812,6 +876,75 @@ export interface components {
             /** P90 */
             p90: number;
         };
+        /**
+         * PayoffAnalysis
+         * @description The simulate_payoff event's result: the answer to "should I pay it off?" and everything the Pay Off screen draws.
+         */
+        PayoffAnalysis: {
+            /**
+             * Verdict
+             * @enum {string}
+             */
+            verdict: "pay_it_off" | "pay_with_tradeoff" | "keep_cash" | "no_room" | "no_debt";
+            recommended: components["schemas"]["Recommendation"] | null;
+            /** Strategy Code */
+            strategy_code: string | null;
+            /** Strategy Title */
+            strategy_title: string | null;
+            /** Extra Monthly */
+            extra_monthly: number;
+            /** Lump Sum */
+            lump_sum: number;
+            /** Safe Lump Sum */
+            safe_lump_sum: number;
+            /** Comparison */
+            comparison: components["schemas"]["StrategySummary"][];
+            simulation: components["schemas"]["PayoffSimulation"] | null;
+            answer: components["schemas"]["PayoffAnswer"];
+        };
+        /**
+         * PayoffAnswer
+         * @description Up to two sentences about the chosen plan. The model writes them; the verdict is not part of them.
+         */
+        PayoffAnswer: {
+            /** Text */
+            text: string;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "model" | "template";
+            grounding: components["schemas"]["GroundingSummary"];
+            diagnostics: components["schemas"]["AdviceDiagnostics"];
+        };
+        /** PayoffSimulation */
+        PayoffSimulation: {
+            /**
+             * No Debt
+             * @default false
+             */
+            no_debt?: boolean;
+            strategy?: components["schemas"]["StrategyResult"] | null;
+            simulation?: components["schemas"]["SimulationResult"] | null;
+        };
+        /** PayoffWarning */
+        PayoffWarning: {
+            /** Code */
+            code: string;
+            /** Amount */
+            amount?: number | null;
+            /** Limit */
+            limit?: number | null;
+            /** Unused Amount */
+            unused_amount?: number | null;
+            /** Accounts */
+            accounts?: string[];
+            /**
+             * Detail
+             * @default
+             */
+            detail?: string;
+        };
         /** PercentileBands */
         PercentileBands: {
             /** P10 */
@@ -918,6 +1051,15 @@ export interface components {
             /** Flags */
             flags: string[];
         };
+        /** Recommendation */
+        Recommendation: {
+            /** Code */
+            code: string | null;
+            /** Reason Code */
+            reason_code: string;
+            /** Name */
+            name?: string | null;
+        };
         /**
          * Recurring
          * @description A cash flow that repeats (derived from checking transactions).
@@ -1007,6 +1149,30 @@ export interface components {
              */
             ira_type?: "roth" | "traditional" | "";
         };
+        /** ScheduleRow */
+        ScheduleRow: {
+            /** Month */
+            month: number;
+            /**
+             * Date
+             * Format: date
+             */
+            date: string;
+            /** Payments */
+            payments: {
+                [key: string]: number;
+            };
+            /** Interest */
+            interest: {
+                [key: string]: number;
+            };
+            /** Balances */
+            balances: {
+                [key: string]: number;
+            };
+            /** Total Payment */
+            total_payment: number;
+        };
         /** Shortfall */
         Shortfall: {
             /** Buffer */
@@ -1025,6 +1191,57 @@ export interface components {
             last_date_below_p50: string | null;
             /** Month End Probability By Month */
             month_end_probability_by_month: components["schemas"]["MonthEndProbability"][];
+        };
+        /** SimDiff */
+        SimDiff: {
+            /** End P50 */
+            end_p50: number;
+            /** Min P10 */
+            min_p10: number;
+            /** Overdraft Prob */
+            overdraft_prob: number;
+            /** Cushion Prob */
+            cushion_prob: number;
+            /** Months P10 Below Cushion */
+            months_p10_below_cushion: number;
+        };
+        /** SimSummary */
+        SimSummary: {
+            /** End P50 */
+            end_p50: number;
+            /** Min P10 */
+            min_p10: number;
+            /** Overdraft Prob */
+            overdraft_prob: number;
+            /** Cushion Prob */
+            cushion_prob: number;
+            /** Months P10 Below Cushion */
+            months_p10_below_cushion: number;
+        };
+        /** SimulationResult */
+        SimulationResult: {
+            /** Profile Id */
+            profile_id: string;
+            /** Days */
+            days: number;
+            /** Horizon Months */
+            horizon_months: number;
+            /** Paths */
+            paths: number;
+            /** Cushion */
+            cushion: number;
+            baseline_summary: components["schemas"]["SimSummary"];
+            scenario_summary: components["schemas"]["SimSummary"];
+            diff: components["schemas"]["SimDiff"];
+            /** Baseline Monthly */
+            baseline_monthly: components["schemas"]["MonthEndPoint"][] | null;
+            /** Scenario Monthly */
+            scenario_monthly: components["schemas"]["MonthEndPoint"][] | null;
+            /** Flows */
+            flows: number;
+            plan?: components["schemas"]["StrategyResult"] | null;
+            /** Warnings */
+            warnings?: components["schemas"]["PayoffWarning"][];
         };
         /**
          * SpendingProfile
@@ -1105,6 +1322,60 @@ export interface components {
             label: string;
             /** Note */
             note: string;
+        };
+        /** StrategyResult */
+        StrategyResult: {
+            /** Code */
+            code: string;
+            /** Name */
+            name: string;
+            /** Order */
+            order: string[];
+            /** Extra Monthly */
+            extra_monthly: number;
+            /** Lump Sum */
+            lump_sum: number;
+            /** Lump Applied */
+            lump_applied: number;
+            /** Safe Lump Sum */
+            safe_lump_sum: number;
+            amortization: components["schemas"]["Amortization"];
+            /** Interest Saved Vs Minimum */
+            interest_saved_vs_minimum: number;
+            /** Months Saved Vs Minimum */
+            months_saved_vs_minimum: number | null;
+            /** Snowball Extra Cost */
+            snowball_extra_cost?: number | null;
+            cushion_impact?: components["schemas"]["CushionImpact"] | null;
+            /** Warnings */
+            warnings?: components["schemas"]["PayoffWarning"][];
+        };
+        /** StrategySummary */
+        StrategySummary: {
+            /** Code */
+            code: string;
+            /** Name */
+            name: string;
+            /** Months */
+            months: number | null;
+            /** Payoff Date */
+            payoff_date: string | null;
+            /** Total Interest */
+            total_interest: number;
+            /** Interest Saved */
+            interest_saved: number;
+            /** Months Saved */
+            months_saved: number | null;
+            /** Cushion Min P10 */
+            cushion_min_p10: number | null;
+            /** Cushion Min P10 Diff */
+            cushion_min_p10_diff: number | null;
+            /** Months P10 Below Cushion */
+            months_p10_below_cushion: number | null;
+            /** Months P10 Below Cushion Diff */
+            months_p10_below_cushion_diff: number | null;
+            /** Warnings */
+            warnings: components["schemas"]["PayoffWarning"][];
         };
         /** Subscription */
         Subscription: {
@@ -1594,41 +1865,6 @@ export interface components {
              */
             include_mortgage?: boolean;
         };
-        /** Amortization */
-        Amortization: {
-            /** Months To Payoff */
-            months_to_payoff: number | null;
-            /** Payoff Date */
-            payoff_date: string | null;
-            /** Total Interest */
-            total_interest: number;
-            /** Total Paid */
-            total_paid: number;
-            /** Never Pays Off */
-            never_pays_off: boolean;
-            /** Hit Max Months */
-            hit_max_months: boolean;
-            /** Max Months */
-            max_months: number;
-            /** Extra Monthly */
-            extra_monthly: number;
-            /** Lump Sum */
-            lump_sum: number;
-            /** Lump Applied */
-            lump_applied: number;
-            /** Rollover */
-            rollover: boolean;
-            /** Order */
-            order: string[];
-            /** Lump Order */
-            lump_order: string[];
-            /** Per Debt */
-            per_debt: {
-                [key: string]: components["schemas"]["DebtPayoff"];
-            };
-            /** Schedule */
-            schedule: components["schemas"]["ScheduleRow"][];
-        };
         /** ComparisonRow */
         ComparisonRow: {
             /** Code */
@@ -1645,18 +1881,6 @@ export interface components {
             cushion_min_p10: number | null;
             /** Months P10 Below Cushion */
             months_p10_below_cushion: number | null;
-        };
-        /** CushionImpact */
-        CushionImpact: {
-            /** Cushion */
-            cushion: number;
-            /** Horizon Months */
-            horizon_months: number;
-            /** Paths */
-            paths: number;
-            baseline: components["schemas"]["SimSummary"];
-            scenario: components["schemas"]["SimSummary"];
-            diff: components["schemas"]["SimDiff"];
         };
         /** Debt */
         Debt: {
@@ -1703,142 +1927,6 @@ export interface components {
              */
             term_months_remaining?: number | null;
         };
-        /** DebtPayoff */
-        DebtPayoff: {
-            /** Payoff Month */
-            payoff_month: number | null;
-            /** Payoff Date */
-            payoff_date: string | null;
-            /** Interest */
-            interest: number;
-            /** Paid */
-            paid: number;
-            /**
-             * Never Pays Off
-             * @default false
-             */
-            never_pays_off?: boolean;
-        };
-        /** PayoffWarning */
-        PayoffWarning: {
-            /** Code */
-            code: string;
-            /**
-             * Amount
-             * @default null
-             */
-            amount?: number | null;
-            /**
-             * Limit
-             * @default null
-             */
-            limit?: number | null;
-            /**
-             * Unused Amount
-             * @default null
-             */
-            unused_amount?: number | null;
-            /** Accounts */
-            accounts?: string[];
-            /**
-             * Detail
-             * @default
-             */
-            detail?: string;
-        };
-        /** Recommendation */
-        Recommendation: {
-            /** Code */
-            code: string | null;
-            /** Reason Code */
-            reason_code: string;
-            /**
-             * Name
-             * @default null
-             */
-            name?: string | null;
-        };
-        /** ScheduleRow */
-        ScheduleRow: {
-            /** Month */
-            month: number;
-            /**
-             * Date
-             * Format: date
-             */
-            date: string;
-            /** Payments */
-            payments: {
-                [key: string]: number;
-            };
-            /** Interest */
-            interest: {
-                [key: string]: number;
-            };
-            /** Balances */
-            balances: {
-                [key: string]: number;
-            };
-            /** Total Payment */
-            total_payment: number;
-        };
-        /** SimDiff */
-        SimDiff: {
-            /** End P50 */
-            end_p50: number;
-            /** Min P10 */
-            min_p10: number;
-            /** Overdraft Prob */
-            overdraft_prob: number;
-            /** Cushion Prob */
-            cushion_prob: number;
-            /** Months P10 Below Cushion */
-            months_p10_below_cushion: number;
-        };
-        /** SimSummary */
-        SimSummary: {
-            /** End P50 */
-            end_p50: number;
-            /** Min P10 */
-            min_p10: number;
-            /** Overdraft Prob */
-            overdraft_prob: number;
-            /** Cushion Prob */
-            cushion_prob: number;
-            /** Months P10 Below Cushion */
-            months_p10_below_cushion: number;
-        };
-        /** StrategyResult */
-        StrategyResult: {
-            /** Code */
-            code: string;
-            /** Name */
-            name: string;
-            /** Order */
-            order: string[];
-            /** Extra Monthly */
-            extra_monthly: number;
-            /** Lump Sum */
-            lump_sum: number;
-            /** Lump Applied */
-            lump_applied: number;
-            /** Safe Lump Sum */
-            safe_lump_sum: number;
-            amortization: components["schemas"]["Amortization"];
-            /** Interest Saved Vs Minimum */
-            interest_saved_vs_minimum: number;
-            /** Months Saved Vs Minimum */
-            months_saved_vs_minimum: number | null;
-            /**
-             * Snowball Extra Cost
-             * @default null
-             */
-            snowball_extra_cost?: number | null;
-            /** @default null */
-            cushion_impact?: components["schemas"]["CushionImpact"] | null;
-            /** Warnings */
-            warnings?: components["schemas"]["PayoffWarning"][];
-        };
         /** PayoffStrategies */
         PayoffStrategies: {
             /** Profile Id */
@@ -1876,33 +1964,6 @@ export interface components {
             paths: number | null;
             /** Runtime Ms */
             runtime_ms: number;
-        };
-        /** StrategySummary */
-        StrategySummary: {
-            /** Code */
-            code: string;
-            /** Name */
-            name: string;
-            /** Months */
-            months: number | null;
-            /** Payoff Date */
-            payoff_date: string | null;
-            /** Total Interest */
-            total_interest: number;
-            /** Interest Saved */
-            interest_saved: number;
-            /** Months Saved */
-            months_saved: number | null;
-            /** Cushion Min P10 */
-            cushion_min_p10: number | null;
-            /** Cushion Min P10 Diff */
-            cushion_min_p10_diff: number | null;
-            /** Months P10 Below Cushion */
-            months_p10_below_cushion: number | null;
-            /** Months P10 Below Cushion Diff */
-            months_p10_below_cushion_diff: number | null;
-            /** Warnings */
-            warnings: components["schemas"]["PayoffWarning"][];
         };
         /** PayoffStrategiesSummary */
         PayoffStrategiesSummary: {
@@ -1995,32 +2056,6 @@ export interface components {
              */
             payoff_strategy?: string | null;
         };
-        /** SimulationResult */
-        SimulationResult: {
-            /** Profile Id */
-            profile_id: string;
-            /** Days */
-            days: number;
-            /** Horizon Months */
-            horizon_months: number;
-            /** Paths */
-            paths: number;
-            /** Cushion */
-            cushion: number;
-            baseline_summary: components["schemas"]["SimSummary"];
-            scenario_summary: components["schemas"]["SimSummary"];
-            diff: components["schemas"]["SimDiff"];
-            /** Baseline Monthly */
-            baseline_monthly: components["schemas"]["MonthEndPoint"][] | null;
-            /** Scenario Monthly */
-            scenario_monthly: components["schemas"]["MonthEndPoint"][] | null;
-            /** Flows */
-            flows: number;
-            /** @default null */
-            plan?: components["schemas"]["StrategyResult"] | null;
-            /** Warnings */
-            warnings?: components["schemas"]["PayoffWarning"][];
-        };
         /** SimulationSummary */
         SimulationSummary: {
             /** Profile Id */
@@ -2064,18 +2099,6 @@ export interface components {
              * @default null
              */
             order?: string[] | null;
-        };
-        /** PayoffSimulation */
-        PayoffSimulation: {
-            /**
-             * No Debt
-             * @default false
-             */
-            no_debt?: boolean;
-            /** @default null */
-            strategy?: components["schemas"]["StrategyResult"] | null;
-            /** @default null */
-            simulation?: components["schemas"]["SimulationResult"] | null;
         };
         /** PayoffSimulationSummary */
         PayoffSimulationSummary: {

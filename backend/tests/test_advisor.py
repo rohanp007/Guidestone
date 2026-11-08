@@ -132,8 +132,10 @@ def test_the_model_view_has_no_figures_and_no_verdict_word(inputs):
 def test_model_output_is_valid_grounded_and_figure_filled(cid, inputs, monkeypatch):
     inp, facts = inputs[cid]
     advice = run(inp, facts, Model(examples), monkeypatch)
-    assert advice.verdict == inp.verdict and advice.source == "model" and not advice.grounding.retried
-    assert advice.moves and all(m.source == "model" for m in advice.moves)
+    single = list(inp.candidates) == [advisor.pinned_code(inp)]                                    # C010: one candidate, no model call
+    want = "template" if single else "model"
+    assert advice.verdict == inp.verdict and advice.source == want and not advice.grounding.retried
+    assert advice.moves and all(m.source == want for m in advice.moves)
     assert not any("{" in m.why_text or "{" in m.title_text for m in advice.moves)                 # every placeholder filled
     assert_grounded(advice, inp)
     pinned = advisor.pinned_code(inp)
@@ -148,7 +150,8 @@ def test_template_fallback_with_the_model_off(cid, inputs, monkeypatch):
     advice = run(inp, facts, model, monkeypatch)
     pinned = advisor.pinned_code(inp)
     expected = ([pinned] if pinned else []) + [c for c in inp.candidates if c != pinned]
-    assert advice.source == "template" and all(m.source == "template" for m in advice.moves) and len(model.calls) == 1
+    assert advice.source == "template" and all(m.source == "template" for m in advice.moves)
+    assert len(model.calls) == (0 if list(inp.candidates) == [pinned] else 1)
     assert [m.move_code for m in advice.moves] == expected[:3]                                    # pinned first, then waterfall order
     assert advice.verdict == inp.verdict
     assert_grounded(advice, inp)
@@ -394,7 +397,7 @@ def test_other_zero_wordings():
     for code in ("build_starter_cushion", "build_full_cushion", "automate_savings", "increase_retirement"):
         facts = {**f, "target_monthly": 500.0, "gap_monthly": 500.0}
         title, why = advisor.template_move(code, facts)
-        assert "$0" not in why and "no cash" in why or "none of it" in why or "aren't saving" in why, code
+        assert "$0" not in why and "no cash" in why or "nothing is moved" in why or "aren't saving" in why, code
 
 
 def test_reason_codes_never_contain_model_text(inputs, monkeypatch):
@@ -578,3 +581,33 @@ def test_a_budget_miss_is_transient_too(profiles, monkeypatch):
     r = asyncio.run(orchestrator.run("dashboard_open", profiles["C002"], {}))
     assert r.advice.diagnostics.first_reasons == ["budget_exceeded"] and orchestrator.is_transient(r)
     cache.clear()
+
+
+# ---- single move, and every template passes the text checks ---------------------------------------------------------------------
+
+def test_a_single_pinned_candidate_skips_the_model(inputs, monkeypatch):
+    inp, facts = inputs["C010"]
+    assert list(inp.candidates) == ["close_monthly_gap"] and advisor.pinned_code(inp) == "close_monthly_gap"
+    model = Model(examples)
+    advice = run(inp, facts, model, monkeypatch)
+    assert model.calls == []                                                   # no model call
+    assert advice.source == "template" and advice.moves[0].source == "template" and advice.moves[0].move_code == "close_monthly_gap"
+    assert advice.diagnostics.first_reasons == ["single_move"] and advice.diagnostics.first_try_ok and advice.diagnostics.model_calls == 0
+    assert_grounded(advice, inp)
+    # more than one candidate (C002): the model is asked
+    inp2, facts2 = inputs["C002"]
+    model2 = Model(examples)
+    run(inp2, facts2, model2, monkeypatch)
+    assert len(model2.calls) == 1
+
+
+def test_every_sentence_in_the_catalogue_passes_the_style_and_judgment_checks():
+    """The sentences the model is shown, and the templates, must themselves be clean: a model that copies an example must not trip a check
+    (it once did: a zero-figure wording said "none", which the style check rejects as raw machine output)."""
+    for code, spec in SPECS.items():
+        texts = [spec.title] + ([spec.why] if isinstance(spec.why, str) else [spec.why({"freed": [{"state": s}]}) for s in ("ended", "ending")]) \
+            + [t for _, t in spec.variants]
+        for t in texts:
+            filled = advisor.tidy(grounding.fill(t, {p.name: "$100" for p in spec.ph}))
+            conflicts = grounding.check_style(filled, {}) + grounding.check_wording(filled, {}, judgments=True)
+            assert not conflicts, (code, [c.phrase for c in conflicts])

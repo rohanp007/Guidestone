@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from ..data.models import Profile
 from .models import PlanStep
@@ -25,6 +25,7 @@ class EventSpec:
     explain: bool                                        # produce a grounded summary
     advise: bool                                         # run the decision rules and the advisor
     cache: Literal["session", "params", "none"]          # session / params: keyed by the params, kept until the data or prompt changes
+    pipeline: Literal["dashboard", "payoff"] = "dashboard"
 
     def tools_for(self, profile: Profile) -> list[str]:
         """The allowed tools that make sense for this customer (a retiree has no paycheck to lose)."""
@@ -37,6 +38,15 @@ def _dashboard_default(profile: Profile) -> list[PlanStep]:
     return [PlanStep(tool="job_loss_stress", args={"horizon_months": 24}, reason="default: emergency fund and job-loss check")]
 
 
+class SimulatePayoffParams(BaseModel):
+    """What the Pay Off screen sends. Omitted = the plan's default (the monthly surplus, the safe lump sum, the recommended strategy);
+    0 = none."""
+    model_config = ConfigDict(extra="forbid")
+    extra_monthly: float | None = Field(None, ge=0, le=1_000_000)
+    lump_sum: float | None = Field(None, ge=0, le=100_000_000)
+    strategy: Literal["A", "B", "C", "D", "E"] | None = None
+
+
 EVENTS: dict[str, EventSpec] = {
     "dashboard_open": EventSpec(
         name="dashboard_open", feature="dashboard", params=NoParams,
@@ -44,6 +54,10 @@ EVENTS: dict[str, EventSpec] = {
                     PlanStep(tool="paycheck_to_paycheck", reason="precompute")],
         allowed_tools=["job_loss_stress", "forecast_liquid_summary"],
         default_plan=_dashboard_default, explain=True, advise=True, cache="session"),
+    # no planner: the plan is fixed (payoff_strategies_summary, then simulate_payoff for the recommended strategy)
+    "simulate_payoff": EventSpec(
+        name="simulate_payoff", feature="payoff", params=SimulatePayoffParams, precompute=[], allowed_tools=[],
+        default_plan=lambda profile: [], explain=False, advise=False, cache="params", pipeline="payoff"),
 }
 
 
