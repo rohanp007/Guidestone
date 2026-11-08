@@ -147,7 +147,8 @@ Computed from the schedule, not guessed, and listed in `events` for the UI and t
 - `extra_paycheck`: a calendar month with three biweekly paydays; `monthly_impact` is one paycheck. Two a year for every biweekly earner.
 - `double_payment`: a monthly bill or card payment that slid across the month boundary and lands twice (e.g. Feb 28 falling on a Saturday
   moves to Mar 1, so March has two card payments); `monthly_impact` is the extra payment (card: the simulated median).
-- `raise` and `rent_renewal` are placed on the as-of anniversary. That timing is assumed, and the debug page labels it.
+- `raise` and `rent_renewal` are placed on the as-of anniversary. That timing is assumed: the event carries `assumed_timing: true` and the UI labels it.
+- Event descriptions state facts only (what, when, how much). Recommendations are the advisor's job, from the whole profile.
 
 ## Utility seasonality (tested, off)
 

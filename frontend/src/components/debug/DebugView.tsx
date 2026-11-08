@@ -178,8 +178,8 @@ export default function DebugView({ id }: { id: string }) {
                     rows={fc.result.events.map((e) => [
                       e.day,
                       e.kind,
-                      e.kind === "raise" || e.kind === "rent_renewal"
-                        ? <span key="d">{e.description} <em className="text-xs text-gray-500 not-italic">(assumed timing: as-of anniversary)</em></span>
+                      e.assumed_timing
+                        ? <span key="d">{e.description} <em className="text-xs text-gray-500 not-italic">(assumed timing)</em></span>
                         : e.description,
                       e.monthly_impact != null ? money(e.monthly_impact) : "",
                     ])}

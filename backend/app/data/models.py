@@ -292,6 +292,7 @@ class ForecastEvent(Base):
     kind: ForecastEventKind
     description: str
     monthly_impact: float | None = None    # signed $/mo effect on cash flow; None when there is no cash effect (cd_matures)
+    assumed_timing: bool = False           # True when the date is an assumption, not known (raises and rent renewals sit on the as-of anniversary)
 
 
 class Assumption(Base):

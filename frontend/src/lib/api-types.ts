@@ -757,6 +757,11 @@ export interface components {
              * @default null
              */
             monthly_impact?: number | null;
+            /**
+             * Assumed Timing
+             * @default false
+             */
+            assumed_timing?: boolean;
         };
         /** LowPoint */
         LowPoint: {

@@ -176,11 +176,11 @@ def build_schedule(profile: Profile, horizon_months: int, A: dict[str, float], c
             if is_income and r.cadence == "biweekly" and len(ds) == 3:
                 amt = amount_on(ds[2])
                 sch.events.append(ForecastEvent(day=ds[2], kind="extra_paycheck", monthly_impact=amt,
-                                                description=f"{ds[2]:%B} has a third paycheck (${amt:,.0f}). Put it toward debt or your cushion before it gets spent"))
+                                                description=f"{ds[2]:%B} has a third paycheck (${amt:,.0f})"))
             elif not is_income and r.cadence == "monthly" and kind in ("bill", "debt_payment") and len(ds) == 2:
                 amt = amount_on(ds[1])
                 sch.events.append(ForecastEvent(day=ds[1], kind="double_payment", monthly_impact=amt,
-                                                description=f"{r.description} lands twice in {ds[1]:%B} ({ds[0]:%b} {ds[0].day} and {ds[1]:%b} {ds[1].day}): about ${abs(amt):,.0f} tighter than usual"))
+                                                description=f"{r.description} lands twice in {ds[1]:%B} ({ds[0]:%b} {ds[0].day} and {ds[1]:%b} {ds[1].day}); extra payment ${abs(amt):,.0f}"))
 
         for d in dates:
             sch.cash.append([d, kind, amount_on(d), r.description, r.residuals or None])
@@ -190,16 +190,16 @@ def build_schedule(profile: Profile, horizon_months: int, A: dict[str, float], c
         if d > end: break
         if income_monthly:
             sch.events.append(ForecastEvent(day=d, kind="raise", description=f"Annual {'COLA' if profile.employment == 'retired' else 'raise'} of {growth:.1%}",
-                                            monthly_impact=income_monthly * (1 + growth) ** (n - 1) * growth))
+                                            monthly_impact=income_monthly * (1 + growth) ** (n - 1) * growth, assumed_timing=True))
         if rent_monthly:
             sch.events.append(ForecastEvent(day=d, kind="rent_renewal", description=f"Rent renewal, +{bump:.1%}",
-                                            monthly_impact=-rent_monthly * (1 + bump) ** (n - 1) * bump))
+                                            monthly_impact=-rent_monthly * (1 + bump) ** (n - 1) * bump, assumed_timing=True))
 
     for a in profile.accounts_of("cd"):                       # auto-renews and stays outside liquid cash: a marker, no cash
         m = a.maturity_date
         while m and a.term_months and m <= end:
             if m > as_of:
-                sch.events.append(ForecastEvent(day=m, kind="cd_matures", description=f"CD matures and auto-renews at the market rate", monthly_impact=None))
+                sch.events.append(ForecastEvent(day=m, kind="cd_matures", description="CD matures and auto-renews", monthly_impact=None))
             m = add_months(m, a.term_months)
 
     for c in changes or []:
@@ -372,7 +372,7 @@ def _simulate(profile: Profile, horizon_months: int, paths: int, cushion: float,
             if len(ds) == 2:
                 amt = -float(np.median(by_date[ds[1]]))
                 sch.events.append(ForecastEvent(day=ds[1], kind="double_payment", monthly_impact=amt,
-                                                description=f"Card payments land twice in {ds[1]:%B} ({ds[0]:%b} {ds[0].day} and {ds[1]:%b} {ds[1].day}): about ${abs(amt):,.0f} tighter than usual"))
+                                                description=f"Card payments land twice in {ds[1]:%B} ({ds[0]:%b} {ds[0].day} and {ds[1]:%b} {ds[1].day}); extra payment ${abs(amt):,.0f}"))
         sch.events.sort(key=lambda e: (e.day, e.kind))
 
     balance = np.empty((paths, D + 1))
