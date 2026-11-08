@@ -8,11 +8,17 @@ from pydantic import BaseModel
 from ..data.models import Base
 
 
+class LLMHealth(Base):
+    reachable: bool                      # the LLM server answered GET /models
+    models_ready: bool                   # every configured local model is loaded
+
+
 class Health(Base):
     status: str
     profiles_loaded: int
     as_of: str
     data_hash: str                       # changes whenever the data or the code that builds profiles changes
+    llm: LLMHealth
 
 
 class ProfileListItem(Base):

@@ -13,6 +13,7 @@ from . import auth, config
 from .api import formulas, meta, profiles
 from .api.serialize import SafeJSONResponse
 from .data import loader
+from .llm import client as llm_client
 from .formulas.registry import FORMULAS
 
 log = logging.getLogger("guidestone")
@@ -30,6 +31,7 @@ async def lifespan(app: FastAPI):
     loader._tables()                     # transactions and statements, for the transactions endpoint
     profiles.paycheck_flags()
     yield
+    await llm_client.close_clients()
 
 
 _demo = config.auth_settings().demo_mode      # the interactive docs and the schema are only served in demo mode

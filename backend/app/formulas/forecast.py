@@ -456,11 +456,13 @@ def _summarize(profile: Profile, sim: Sim, horizon_months: int, A_all: dict[str,
     drivers["variable_spend_median"] = -sim.month1_variable
     drivers["interest"] = sim.month1_interest
 
+    monthly = [MonthEndPoint(month=me.strftime("%Y-%m"), day=me, p10=float(p10m[i]), p50=float(p50[i]), p90=float(p90m[i]))
+               for me, i in zip(sch.month_ends, me_idx)]
     return LiquidForecast(
         profile_id=profile.id, as_of_date=sch.as_of, horizon_months=horizon_months, paths=sim.paths, start_liquid=sim.start_liquid,
+        end_balance=monthly[-1], balance_12m=monthly[11] if len(monthly) >= 12 else None,
         daily=PercentileBands(p10=p10d[:DAILY_DAYS + 1].tolist(), p50=p50[:DAILY_DAYS + 1].tolist(), p90=p90d[:DAILY_DAYS + 1].tolist()),
-        monthly=[MonthEndPoint(month=me.strftime("%Y-%m"), day=me, p10=float(p10m[i]), p50=float(p50[i]), p90=float(p90m[i]))
-                 for me, i in zip(sch.month_ends, me_idx)],
+        monthly=monthly,
         low_point=LowPoint(day=day(low), p50=float(p50[low]), p10=float(p10d[low])),
         overdraft_risk=risk("overdraft"), cushion_risk=risk("cushion"),
         monthly_net=MonthlyNet(mean=float(sim.net_per_month.mean()), p10=float(np.percentile(sim.net_per_month, 10)),
