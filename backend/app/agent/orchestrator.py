@@ -31,7 +31,11 @@ from .models import MAX_STEPS, Advice, AnalysisResult, GroundingSummary, Headlin
 from .prompts import ORCH_PLAN_V1, PROMPT_VERSION, TOOL_HINTS
 
 log = logging.getLogger("guidestone.agent")
-RUN_TIMEOUT_S = 45.0
+RUN_TIMEOUT_S = 30.0
+TRANSIENT_TTL_S = 60.0           # a result whose advice is a stand-in for a model that was slow or down is kept this long, not for the session
+RERUN_DELAY_S = 5.0              # ...and one background rerun starts this long after it was served
+TRANSIENT_REASONS = {"budget_exceeded", "llm_unavailable", "run_timeout"}
+_reruns: set[asyncio.Task] = set()
 PLAN_MAX_TOKENS = 200
 EXPLAIN_MAX_TOKENS = 200
 
@@ -230,7 +234,9 @@ async def advise(st: _State) -> None:
     t0 = time.perf_counter()
     try:
         st.advice = await advisor.advise(st.rules, st.facts)
-        detail = {"source": st.advice.source, "moves": len(st.advice.moves), "retried": st.advice.grounding.retried}
+        d = st.advice.diagnostics
+        detail = {"source": st.advice.source, "moves": len(st.advice.moves), "retried": d.retried, "first_try_ok": d.first_try_ok,
+                  "template_moves": d.template_moves, "reasons": ",".join(d.final_reasons or d.first_reasons)[:39]}
         st.trace.append(TraceStep(kind="advise", name="advisor", ms=round((time.perf_counter() - t0) * 1000, 1), detail=detail))
         if st.advice.source != "model":
             st.degraded = True
@@ -284,23 +290,47 @@ async def _execute(st: _State, data_version: str) -> AnalysisResult:
         if st.spec.advise and st.advice is None:
             if st.rules is None:                            # the rules did not finish either: compute them now (formulas only, no model)
                 await run_rules(st)
-            st.advice = advisor.template_advice(st.rules)
+            st.advice = advisor.template_advice(st.rules, reason="run_timeout")
     return _assemble(st, data_version)
 
 
-async def run(event: str, profile: Profile, params: dict, refresh: bool = False) -> AnalysisResult:
-    """KeyError for an unknown event, pydantic.ValidationError for bad params. `profile` is the signed-in customer's own."""
+def is_transient(result: AnalysisResult) -> bool:
+    """Advice served from the template because the advisor ran out of time, was unreachable, or the run hit its limit: temporary."""
+    a = result.advice
+    return bool(a and a.source == "template" and TRANSIENT_REASONS & set(a.diagnostics.first_reasons + a.diagnostics.final_reasons))
+
+
+async def _rerun(event: str, profile: Profile, params: dict) -> None:
+    await asyncio.sleep(RERUN_DELAY_S)
+    try:
+        await run(event, profile, params, rerun=True)
+    except Exception as e:                      # superseded by a newer run, or failed again: the page keeps what it has
+        log.info("background rerun ended: %s", type(e).__name__)
+
+
+def _schedule_rerun(event: str, profile: Profile, params: dict) -> None:
+    task = asyncio.ensure_future(_rerun(event, profile, params))
+    _reruns.add(task)
+    task.add_done_callback(_reruns.discard)
+
+
+async def run(event: str, profile: Profile, params: dict, refresh: bool = False, rerun: bool = False) -> AnalysisResult:
+    """KeyError for an unknown event, pydantic.ValidationError for bad params. `profile` is the signed-in customer's own.
+    rerun: the background retry of a transient result: skips the cache read, never restarts a run in flight, never schedules another."""
     spec = get_event(event)
     args = spec.params.model_validate(params).model_dump(mode="json")
     data_version = loader.cache_key()[:12]
     key = cache.cache_key(profile.id, event, args, PROMPT_VERSION, data_version)
-    if spec.cache != "none" and not refresh and (hit := cache.get(key)) is not None:
+    if spec.cache != "none" and not refresh and not rerun and (hit := cache.get(key)) is not None:
         return hit.with_trace(TraceStep(kind="cache_hit", name=event))
 
     async def go() -> AnalysisResult:
         result = await _execute(_State(spec, profile, args), data_version)
         if spec.cache != "none":
-            cache.put(key, result)
+            transient = is_transient(result)
+            cache.put(key, result, ttl=TRANSIENT_TTL_S if transient else None)
+            if transient and not rerun:
+                _schedule_rerun(event, profile, args)
         return result
 
     return await cache.run_exclusive(profile.id, event, key, go, restart=refresh)
@@ -310,10 +340,27 @@ def is_cache_hit(result: AnalysisResult) -> bool:
     return bool(result.trace) and result.trace[-1].kind == "cache_hit"
 
 
+def _enabled(name: str) -> bool:
+    return os.environ.get(name, "true").strip().lower() in ("1", "true", "yes")
+
+
+async def warm_featured(profiles: dict[str, Profile], ids: list[str]) -> None:
+    """At startup: run dashboard_open for the demo personas, one after the other (the models are single-user servers), so their first
+    page load is a cache hit. Runs in the background; never raises."""
+    if not _enabled("AGENT_WARM_ON_STARTUP"):
+        return
+    for cid in ids:
+        if cid in profiles:
+            await _warm(profiles[cid])
+
+
 async def warm(profile: Profile) -> None:
     """Start dashboard_open at sign-in so the result is usually cached by the time the page asks. Never raises."""
-    if os.environ.get("AGENT_WARM_ON_LOGIN", "true").strip().lower() not in ("1", "true", "yes"):
-        return
+    if _enabled("AGENT_WARM_ON_LOGIN"):
+        await _warm(profile)
+
+
+async def _warm(profile: Profile) -> None:
     try:
         await run("dashboard_open", profile, {})
     except Exception as e:

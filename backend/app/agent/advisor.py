@@ -1,13 +1,15 @@
 """The advisor (docs/rules.md section 4): picks and words the next moves. It never decides them.
 
 Code decides everything that matters: the verdict (rules.verdict), the candidate moves and their facts (rules.candidate_moves). The
-model only chooses up to 3 of the candidates, orders them, and writes a short title and one sentence for each, using {placeholders}
-that the app fills with the real figures.
+model only chooses up to 3 of the candidates, orders them, and writes one sentence for each, using {placeholders} that the app
+fills with the real figures. Titles are fixed per move code (sentence case), and a zero figure that would read badly ("save $0 a month")
+has a code-chosen wording of its own.
 
 Checks, in order: every move_code must be a candidate (an unknown one is rejected and retried); then each move's text, after the
 placeholders are filled, goes through the grounding checks (figures against that move's own facts, wording against the forecast
 labels, no judgments, plain English). Anything wrong -> one retry at temperature 0.4 that names the problems -> for the moves that are
 still wrong, the deterministic template for their move_code (and if nothing usable is left, the top 3 candidates in waterfall order).
+The whole call has a time budget (config advisor_budget_s); past it, the template result is served, never an error.
 The model's view has move codes (it must name them) but no numbers and no verdict wording to repeat.
 """
 from __future__ import annotations
@@ -17,15 +19,16 @@ import re
 import time
 from dataclasses import dataclass, field
 from datetime import date
+import math
 from typing import Any, Callable
 
 from pydantic import BaseModel, Field
 
 from ..data.models import Profile
 from ..formulas import rules
-from ..llm import client, grounding
+from ..llm import client, config as llm_config, grounding
 from ..llm.facts import CUSHION_TEXT, OVERDRAFT_TEXT, TREND_TEXT
-from .models import Advice, AdviceMove, GroundingSummary
+from .models import Advice, AdviceDiagnostics, AdviceMove, BadReply, GroundingSummary
 
 ADVISE_VERSION = "advise-v1"
 MAX_MOVES = 3
@@ -37,31 +40,53 @@ VERDICT_TEXT = {"act_now": "act now", "plan_ahead": "plan ahead", "on_track": "o
 
 class AdvisorMove(BaseModel):
     move_code: str = Field(description="Exactly one of the candidate move codes")
-    title_text: str = Field(description="A few words, using {placeholders} for any figure")
     why_text: str = Field(description="One short plain sentence for this customer, using {placeholders} for every figure")
 
 
 class AdvisorAnswer(BaseModel):
-    moves: list[AdvisorMove] = Field(default_factory=list, description="At most 3, most important first")
+    """The app puts the move for the current step first (`pinned_why` is its sentence); the model picks up to 2 more (3 when nothing is
+    pinned) from the other candidates."""
+    pinned_why: str | None = Field(None, description="The sentence for the first move, which the app has chosen")
+    more: list[AdvisorMove] = Field(default_factory=list, description="Further moves, most important first")
+
+
+def response_schema(inp: "Inputs") -> dict:
+    """The JSON Schema the server is asked to constrain its output to: move_code can only be one of THIS customer's other candidates,
+    there are at most 2 of them (3 when nothing is pinned), and the pinned sentence is required."""
+    pinned, rest = pinned_code(inp), [c for c in inp.candidates if c != pinned_code(inp)]
+    item = {"type": "object", "additionalProperties": False, "required": ["move_code", "why_text"],
+            "properties": {"move_code": {"type": "string", "enum": rest}, "why_text": {"type": "string"}}}
+    props: dict = {}
+    if pinned:
+        props["pinned_why"] = {"type": "string"}
+    if rest:
+        props["more"] = {"type": "array", "maxItems": MAX_MOVES - bool(pinned), "items": item}
+    return {"type": "object", "additionalProperties": False, "properties": props,
+            "required": (["pinned_why"] if pinned else []) + ([] if pinned or not rest else ["more"])}
 
 
 ADVISOR_PROMPT = (
-    "You are a careful financial coach. From the candidate moves, choose up to 3 that matter most for this customer, most important "
-    "first. For each, write a short title (a few words, capitalised) and one plain sentence saying why it fits this customer.\n"
+    "You are a careful financial coach. The app has already chosen the customer's first move. You write one plain sentence saying why "
+    "it fits this customer, and you may add up to 2 more moves from the others, most important first, each with one sentence.\n"
     "Rules:\n"
-    "- move_code must be copied exactly from the list. Choose only from the list.\n"
+    "- move_code must be copied exactly from the list of other moves. Choose only from that list.\n"
     "- Each move has an example sentence. Adapt it: keep its {placeholders} written in braces exactly, because the app fills in the "
     "real amounts, dates and percentages. Never type a number yourself, and use only the placeholders listed under that same move.\n"
-    "- The moves are listed in the app's suggested order; keep that order unless this customer's situation clearly calls for another.\n"
+    "- The other moves are listed in the app's suggested order; keep that order unless this customer's situation clearly calls for another.\n"
     "- Do not state an overall judgment, risk level or reassurance, and do not repeat the urgency. The app shows that separately.\n"
-    "- Plain English only. No codes or field names in the title or sentence.\n"
-    'Reply with only JSON: {"moves":[{"move_code":"<code>","title_text":"<few words>","why_text":"<one sentence>"}]}')
+    "- Plain English only. No codes or field names in the sentences.\n"
+    'Reply with only JSON: {"pinned_why":"<sentence for the first move>","more":[{"move_code":"<code>","why_text":"<sentence>"}]}. '
+    "When there is no first move, leave out pinned_why and choose 1 to 3 moves.")
 
 
 # ---- the move catalogue --------------------------------------------------------------------------------------------------------
 # Per move_code: the placeholders it offers (from the candidate's facts), what the model is told each means, the blurb the model
 # sees, and the deterministic template. A placeholder's NAME ends the way grounding expects for its kind: _apr / _rate / _pct / _share
 # are percentages, _months are lengths of time, everything else is money or a date.
+
+ZERO = 0.5                           # a money figure under this shows as "$0"
+ZERO_FIGURE = re.compile(r"\$0(?!\d|,\d|\.\d)")
+
 
 def usd(x: float) -> str:
     return f"${abs(x):,.0f}"
@@ -96,8 +121,9 @@ class P:
 class Spec:
     blurb: str | Callable[[dict], str]
     ph: tuple[P, ...]
-    title: str
-    why: str | Callable[[dict], str]
+    title: str                                       # fixed, sentence case; the model never writes titles
+    why: str | Callable[[dict], str]                 # the default sentence (also the model's example)
+    variants: tuple[tuple[Callable[[dict], bool], str], ...] = ()      # (when, sentence) tried first: a zero figure that would read badly
 
 
 SPECS: dict[str, Spec] = {
@@ -113,7 +139,8 @@ SPECS: dict[str, Spec] = {
          P("starter_cushion_target", lambda f: f["target"], usd, "size of the starter fund"),
          P("starter_cushion_gap", lambda f: f["gap"], usd, "how much more is needed")),
         "Build a starter cushion",
-        "You have {starter_cushion_now} in cash against a starter fund of {starter_cushion_target}; adding {starter_cushion_gap} gets you there."),
+        "You have {starter_cushion_now} in cash against a starter fund of {starter_cushion_target}; adding {starter_cushion_gap} gets you there.",
+        ((lambda f: f["liquid"] < ZERO, "You have no cash set aside yet; building a starter fund of {starter_cushion_target} is the first goal."),)),
     "confirm_401k_match": Spec(
         "The customer's employer offers a 401(k) match, and we cannot see whether they get all of it.",
         (P("match_pct", lambda f: f["employer_match_pct"], pct, "share of pay the employer matches"),
@@ -139,14 +166,16 @@ SPECS: dict[str, Spec] = {
          P("cushion_gap", lambda f: f["gap"], usd, "how much more is needed"),
          P("cushion_months", lambda f: f["months"], months, "how many months of essentials the cushion covers, with the unit")),
         "Build your full emergency cushion",
-        "You have {cushion_now} in cash against a full cushion of {cushion_target} ({cushion_months} of essentials), so {cushion_gap} more is needed."),
+        "You have {cushion_now} in cash against a full cushion of {cushion_target} ({cushion_months} of essentials), so {cushion_gap} more is needed.",
+        ((lambda f: f["liquid"] < ZERO, "You have no cash set aside yet; a full cushion of {cushion_target} ({cushion_months} of essentials) is the goal."),)),
     "increase_retirement": Spec(
         "Retirement saving is below the usual target share of pay.",
         (P("retirement_monthly_now", lambda f: f["current_monthly"], usd, "retirement saving each month today"),
          P("retirement_monthly_target", lambda f: f["target_monthly"], usd, "the target each month"),
          P("retirement_monthly_gap", lambda f: f["gap_monthly"], usd, "how much more each month")),
         "Save more for retirement",
-        "You save about {retirement_monthly_now} a month toward retirement against a target of {retirement_monthly_target}, so {retirement_monthly_gap} more a month closes the gap."),
+        "You save about {retirement_monthly_now} a month toward retirement against a target of {retirement_monthly_target}, so {retirement_monthly_gap} more a month closes the gap.",
+        ((lambda f: f["current_monthly"] < ZERO, "You aren't saving for retirement yet; aiming for about {retirement_monthly_target} a month would get you to the target."),)),
     "start_education_savings": Spec(
         "The customer has children under 18 and the earlier goals are under way. Retirement saving comes first.",
         (),
@@ -189,7 +218,8 @@ SPECS: dict[str, Spec] = {
         (P("monthly_surplus", lambda f: f["surplus"], usd, "what is left over each month"),
          P("automated_monthly", lambda f: f["automated_monthly"], usd, "what is already moved to savings automatically each month")),
         "Automate your savings",
-        "About {monthly_surplus} a month is left over and only {automated_monthly} is moved to savings automatically; automating more makes saving happen first."),
+        "About {monthly_surplus} a month is left over and only {automated_monthly} is moved to savings automatically; automating more makes saving happen first.",
+        ((lambda f: f["automated_monthly"] < ZERO, "About {monthly_surplus} a month is left over and none of it is moved to savings automatically; automating it makes saving happen first."),)),
 }
 
 # Which placeholders are percentages / counts / dates is carried by the name (see above); the grounding facts use these exact names.
@@ -218,11 +248,19 @@ def move_text(code: str, facts: dict) -> MoveText:
     return MoveText(code, ph, values, {p.name: p.means for p in spec.ph})
 
 
+def sentence(code: str, facts: dict) -> str:
+    """The move's sentence with placeholders still in it, chosen in code: a zero-figure variant when one applies, else the default."""
+    spec = SPECS[code]
+    for when, text in spec.variants:
+        if when(facts):
+            return text
+    return spec.why(facts) if callable(spec.why) else spec.why
+
+
 def template_move(code: str, facts: dict) -> tuple[str, str]:
     """The deterministic title and sentence for a move: the catalogue text with its own placeholders filled in."""
-    spec, mt = SPECS[code], move_text(code, facts)
-    why = spec.why(facts) if callable(spec.why) else spec.why
-    return tidy(grounding.fill(spec.title, mt.ph)), tidy(grounding.fill(why, mt.ph))
+    mt = move_text(code, facts)
+    return SPECS[code].title, tidy(grounding.fill(sentence(code, facts), mt.ph))
 
 
 # ---- inputs --------------------------------------------------------------------------------------------------------------------
@@ -259,14 +297,23 @@ def model_view(inp: Inputs, facts: dict) -> str:
         f"{', often runs low before payday' if facts.get('paycheck_to_paycheck') == 'yes' else ''}.",
         f"Cash outlook: {TREND_TEXT.get(facts.get('trend'), 'unclear')}; it {CUSHION_TEXT.get(facts.get('cushion_status'), '')}; "
         f"{OVERDRAFT_TEXT.get(facts.get('overdraft_status'), '')}.",
-        f"Urgency set by the app (do not repeat it): {VERDICT_TEXT[inp.verdict]}.",
-        "Candidate moves, in the app's suggested order:"]
-    for i, (code, move) in enumerate(inp.candidates.items(), 1):
-        mt = move_text(code, move.facts)
-        spec = SPECS[code]
-        lines.append(f"{i}. move_code {code}: {spec.blurb(move.facts) if callable(spec.blurb) else spec.blurb}")
-        lines.append("   placeholders: " + ("; ".join(f"{{{k}}} = {v}" for k, v in mt.means.items()) or "none (write no figures)"))
-        lines.append(f"   example sentence: {spec.why(move.facts) if callable(spec.why) else spec.why}")
+        f"Urgency set by the app (do not repeat it): {VERDICT_TEXT[inp.verdict]}."]
+    pinned = pinned_code(inp)
+
+    def entry(code: str, move) -> list[str]:
+        spec, mt = SPECS[code], move_text(code, move.facts)
+        return [f"move_code {code}: (situation, not to be copied) {spec.blurb(move.facts) if callable(spec.blurb) else spec.blurb}",
+                "   placeholders: " + ("; ".join(f"{{{k}}} = {v}" for k, v in mt.means.items()) or "none (write no figures)"),
+                f"   example sentence (adapt this one, keep its braces): {sentence(code, move.facts)}"]
+
+    if pinned:
+        lines += ["The app's first move (write its sentence as pinned_why, adapting its example sentence):"] + entry(pinned, inp.candidates[pinned])
+    rest = [c for c in inp.candidates if c != pinned]
+    if rest:
+        lines.append(f"Other moves (choose up to {MAX_MOVES - bool(pinned)} for \"more\", in the app's suggested order):")
+        for i, code in enumerate(rest, 1):
+            first, *others = entry(code, inp.candidates[code])
+            lines += [f"{i}. {first}", *others]
     return "\n".join(lines)
 
 
@@ -276,11 +323,20 @@ def model_view(inp: Inputs, facts: dict) -> str:
 class Checked:
     move: AdvisorMove                  # with the placeholders filled in
     report: grounding.GroundingReport
-    no_figures: bool = False           # the move has figures to give, and the sentence uses none of them
+    no_figures: bool = False           # the sentence should show a figure and uses none of the move's placeholders
+    zero_figure: bool = False          # the filled sentence states a zero amount ("$0")
 
     @property
     def ok(self) -> bool:
-        return self.report.ok and not self.no_figures
+        return self.report.ok and not self.no_figures and not self.zero_figure
+
+    @property
+    def reasons(self) -> list[str]:
+        """Why it failed, as codes only (never text): figure_not_in_facts, judgment, style, contradicts_<label>, no_placeholder, zero_figure."""
+        out = ["figure_not_in_facts"] if self.report.unmatched else []
+        out += [c.field if c.field in ("judgment", "style") else f"contradicts_{c.field}" for c in self.report.conflicts]
+        out += ["no_placeholder"] * self.no_figures + ["zero_figure"] * self.zero_figure
+        return list(dict.fromkeys(out))
 
 
 def _fill_all(inp: Inputs) -> dict[str, str]:
@@ -294,27 +350,31 @@ def check_move(m: AdvisorMove, inp: Inputs) -> Checked:
     """Fill the placeholders, then check the words against ONLY this move's own facts (a figure from another move is not allowed)."""
     move = inp.candidates[m.move_code]
     mt = move_text(m.move_code, move.facts)
-    allp = _fill_all(inp)
-    filled = AdvisorMove(move_code=m.move_code, title_text=tidy(grounding.fill(m.title_text, allp) or ""),
-                         why_text=tidy(grounding.fill(m.why_text, allp) or ""))
+    filled = AdvisorMove(move_code=m.move_code, why_text=tidy(grounding.fill(m.why_text, _fill_all(inp)) or ""))
     facts = {**mt.values, **inp.labels}
-    report = grounding.check(f"{filled.title_text}. {filled.why_text}", facts, judgments=True, style=True, hints=False)
-    unused = bool(mt.ph) and not any("{" + k + "}" in m.why_text for k in mt.ph)           # a move with figures must show at least one
-    return Checked(filled, report, unused)
+    report = grounding.check(filled.why_text, facts, judgments=True, style=True, hints=False)
+    wants_figures = "{" in sentence(m.move_code, move.facts)                       # a zero variant may have none to show
+    unused = wants_figures and not any("{" + k + "}" in m.why_text for k in mt.ph)
+    return Checked(filled, report, unused, bool(ZERO_FIGURE.search(filled.why_text)))
+
+
+def pinned_code(inp: Inputs) -> str | None:
+    """The move for the waterfall's current step. Code puts it first: the model decides its wording and what follows, not whether the
+    most pressing step is mentioned. (The first such move when several serve the step.)"""
+    return next((code for code, m in inp.candidates.items() if m.addresses_current_step), None)
 
 
 def required(inp: Inputs) -> list[str]:
-    """Moves that serve the waterfall's current step must be among the advice: the model decides wording and order, not whether the
-    most pressing step is mentioned."""
-    return [code for code, m in inp.candidates.items() if m.addresses_current_step]
+    return [c] if (c := pinned_code(inp)) else []
 
 
 def _complaint(invalid: list[str], bad: list[Checked], inp: Inputs, missing: list[str]) -> str:
     parts = []
     if missing:
-        parts.append(f"You must include: {', '.join(missing)}.")
+        parts.append(f"You must write pinned_why: the sentence for {', '.join(missing)}.")
     if invalid:
-        parts.append(f"These move codes are not in the list: {', '.join(invalid)}. Use only: {', '.join(inp.candidates)}.")
+        parts.append(f"These move codes are not in the list of other moves: {', '.join(invalid)}. "
+                     f"Use only: {', '.join(c for c in inp.candidates if c != pinned_code(inp))}.")
     for c in bad:
         r, bits = c.report, []
         if r.unmatched:
@@ -327,22 +387,37 @@ def _complaint(invalid: list[str], bad: list[Checked], inp: Inputs, missing: lis
                         + "; ".join(f'"{x.phrase}"' for x in r.conflicts if x.field == "judgment"))
         if c.no_figures:
             bits.append("it uses none of its {placeholders}; adapt the example sentence and keep its placeholders")
+        if c.zero_figure:
+            bits.append("it states a zero amount; use the wording of the example sentence")
         if any(x.field == "style" for x in r.conflicts):
             bits.append("not plain English; use only the listed {placeholders}: " + "; ".join(f'"{x.phrase}"' for x in r.conflicts if x.field == "style"))
         parts.append(f"For {c.move.move_code}: " + "; ".join(bits) + ".")
     return " ".join(parts) + " Rewrite the answer, fixing only these problems, and keep the JSON format."
 
 
-def _screen(answer: AdvisorAnswer, inp: Inputs) -> tuple[list[Checked], list[str], list[Checked]]:
-    """(the valid, distinct moves in the model's order, up to MAX_MOVES; unknown codes; those among them that failed the checks)."""
-    seen, good, invalid = set(), [], []
-    for m in answer.moves:
+def _screen(answer: AdvisorAnswer, inp: Inputs) -> tuple[list[Checked], list[str], list[Checked], list[str]]:
+    """(the checked moves, pinned one first, then the model's others in its order up to MAX_MOVES; unknown codes; those that failed
+    the checks; the pinned move if the model wrote no sentence for it)."""
+    pinned, good, invalid, missing = pinned_code(inp), [], [], []
+    seen = {pinned}
+    if pinned:
+        if (answer.pinned_why or "").strip():
+            good.append(check_move(AdvisorMove(move_code=pinned, why_text=answer.pinned_why), inp))
+        else:
+            missing.append(pinned)
+    for m in answer.more:
         if m.move_code not in inp.candidates:
             invalid.append(m.move_code[:40])
-        elif m.move_code not in seen and len(good) < MAX_MOVES:
+        elif m.move_code not in seen and len(good) + len(missing) < MAX_MOVES:
             seen.add(m.move_code)
             good.append(check_move(m, inp))
-    return good, invalid, [c for c in good if not c.ok]
+    return good, invalid, [c for c in good if not c.ok], missing
+
+
+def _reasons(invalid: list[str], bad: list[Checked], missing: list[str], empty: bool) -> list[str]:
+    out = ["unknown_move_code"] * bool(invalid) + [r for c in bad for r in c.reasons] + ["missing_required_move"] * bool(missing)
+    out += ["no_moves"] * (empty and not invalid)
+    return list(dict.fromkeys(out))
 
 
 # ---- the run -------------------------------------------------------------------------------------------------------------------
@@ -351,7 +426,16 @@ def _screen(answer: AdvisorAnswer, inp: Inputs) -> tuple[list[Checked], list[str
 class _Tally:
     checked: int = 0
     retried: bool = False
+    first_ok: bool = False
+    first_reasons: list[str] = field(default_factory=list)
+    final_reasons: list[str] = field(default_factory=list)
     calls: list[client.LLMResult] = field(default_factory=list)
+    bad_replies: list[BadReply] = field(default_factory=list)
+
+
+def _note_bad_reply(tally: "_Tally", e: client.LLMResponseError) -> None:
+    tally.bad_replies += [BadReply(finish_reason=a["finish_reason"], completion_tokens=a["completion_tokens"], max_tokens=e.max_tokens)
+                          for a in e.attempts]
 
 
 def _ordered(moves: list[AdviceMove]) -> list[AdviceMove]:
@@ -363,10 +447,10 @@ def _ordered(moves: list[AdviceMove]) -> list[AdviceMove]:
     return moves
 
 
-def _assemble(inp: Inputs, picked: list[tuple[str, str, str, str]], tally: _Tally, ok: bool) -> Advice:
-    """picked: (move_code, title, why, source)."""
-    moves = _ordered([AdviceMove(rank=0, move_code=c, title_text=t, why_text=w, source=s, priority=inp.candidates[c].priority,
-                                 addresses_current_step=inp.candidates[c].addresses_current_step) for c, t, w, s in picked])
+def _assemble(inp: Inputs, picked: list[tuple[str, str]], tally: _Tally) -> Advice:
+    """picked: (move_code, why_text, source); the title always comes from the catalogue."""
+    moves = _ordered([AdviceMove(rank=0, move_code=c, title_text=SPECS[c].title, why_text=w, source=s, priority=inp.candidates[c].priority,
+                                 addresses_current_step=inp.candidates[c].addresses_current_step) for c, w, s in picked])
     for i, m in enumerate(moves, 1):
         m.rank = i
     sources = {m.source for m in moves}
@@ -375,53 +459,78 @@ def _assemble(inp: Inputs, picked: list[tuple[str, str, str, str]], tally: _Tall
         notes.append("Retirement saving comes before education saving.")
     return Advice(verdict=inp.verdict, current_step=inp.waterfall.current_step, moves=moves, notes=notes,
                   source="model" if sources == {"model"} else "template" if sources <= {"template"} else "mixed",
-                  grounding=GroundingSummary(ok=ok, checked=tally.checked, retried=tally.retried))
+                  grounding=GroundingSummary(ok=True, checked=tally.checked, retried=tally.retried),
+                  diagnostics=AdviceDiagnostics(first_try_ok=tally.first_ok, retried=tally.retried, model_calls=len(tally.calls),
+                                                template_moves=sum(m.source == "template" for m in moves),
+                                                first_reasons=tally.first_reasons, final_reasons=tally.final_reasons,
+                                                bad_replies=tally.bad_replies))
 
 
-def template_advice(inp: Inputs, tally: _Tally | None = None) -> Advice:
-    """The model's absence: the top candidates in waterfall order with template text."""
+def template_advice(inp: Inputs, tally: _Tally | None = None, reason: str | None = None) -> Advice:
+    """The model's absence: the top candidates in waterfall order with template text. `reason`: why the model's answer was not used
+    (llm_unavailable, llm_bad_reply, budget_exceeded...)."""
     tally = tally or _Tally()
-    picked = []
-    for code, move in list(inp.candidates.items())[:MAX_MOVES]:
-        title, why = template_move(code, move.facts)
-        picked.append((code, title, why, "template"))
-    return _assemble(inp, picked, tally, ok=True)
+    if reason:
+        tally.first_reasons = tally.first_reasons or [reason]
+        tally.final_reasons = tally.final_reasons or [reason]
+    pinned = pinned_code(inp)                                         # the current step's move first, then waterfall order
+    codes = ([pinned] if pinned else []) + [c for c in inp.candidates if c != pinned]
+    picked = [(code, template_move(code, inp.candidates[code].facts)[1], "template") for code in codes[:MAX_MOVES]]
+    return _assemble(inp, picked, tally)
 
 
-async def advise(inp: Inputs, facts: dict) -> Advice:
-    """The model's choice, checked; the template wherever the model's words fail. Never raises because the model failed."""
-    if not inp.candidates:
-        return _assemble(inp, [], _Tally(), ok=True)
+async def advise(inp: Inputs, facts: dict, budget_s: float | None = None) -> Advice:
+    """The model's choice, checked; the template wherever the model's words fail. Never raises because the model failed or was slow:
+    past `budget_s` (default: config advisor_budget_s; math.inf = no limit) the template result is served."""
+    limit = llm_config.advisor_budget_s() if budget_s is None else budget_s
     tally = _Tally()
-    messages = [{"role": "system", "content": ADVISOR_PROMPT}, {"role": "user", "content": model_view(inp, facts)}]
     try:
-        first = await client.complete("advisor", messages, json_schema=AdvisorAnswer, max_tokens=ADVISOR_MAX_TOKENS, schema_in_prompt=False)
-    except client.LLMError:
-        return template_advice(inp, tally)
+        async with asyncio.timeout(None if limit == math.inf else limit):
+            return await _advise(inp, facts, tally)
+    except TimeoutError:
+        return template_advice(inp, _Tally(retried=tally.retried, calls=tally.calls), "budget_exceeded")
+
+
+async def _advise(inp: Inputs, facts: dict, tally: _Tally) -> Advice:
+    if not inp.candidates:
+        tally.first_ok = True
+        return _assemble(inp, [], tally)
+    messages = [{"role": "system", "content": ADVISOR_PROMPT}, {"role": "user", "content": model_view(inp, facts)}]
+    ask = lambda msgs, **kw: client.complete("advisor", msgs, json_schema=AdvisorAnswer, max_tokens=ADVISOR_MAX_TOKENS, schema_in_prompt=False,
+                                             response_schema=response_schema(inp), **kw)
+    try:
+        first = await ask(messages)
+    except client.LLMUnavailable:
+        return template_advice(inp, tally, "llm_unavailable")
+    except client.LLMError as e:
+        if isinstance(e, client.LLMResponseError):
+            _note_bad_reply(tally, e)
+        return template_advice(inp, tally, "llm_bad_reply")
     tally.calls.append(first)
-    good, invalid, bad = _screen(first.parsed, inp)
-    answer = first
-    missing = lambda: [c for c in required(inp) if c not in {g.move.move_code for g in good}]
-    if invalid or bad or not good or missing():
+    good, invalid, bad, missing = _screen(first.parsed, inp)
+    tally.first_ok = not (invalid or bad or not good or missing)
+    tally.first_reasons = _reasons(invalid, bad, missing, not good and not missing)
+    if not tally.first_ok:
         tally.retried = True
-        complaint = _complaint(invalid, bad, inp, missing()) if (invalid or bad or good) else (
+        complaint = _complaint(invalid, bad, inp, missing) if (invalid or bad or good or missing) else (
             f"You chose no move. Choose up to {MAX_MOVES} from: {', '.join(inp.candidates)}.")
         try:
-            answer = await client.complete("advisor", messages + [{"role": "assistant", "content": first.content},
-                                                                  {"role": "user", "content": complaint}],
-                                           json_schema=AdvisorAnswer, max_tokens=ADVISOR_MAX_TOKENS, schema_in_prompt=False,
-                                           temperature=grounding.RETRY_TEMPERATURE)
+            answer = await ask(messages + [{"role": "assistant", "content": first.content}, {"role": "user", "content": complaint}],
+                               temperature=grounding.RETRY_TEMPERATURE)
             tally.calls.append(answer)
-            good, invalid, bad = _screen(answer.parsed, inp)
-        except client.LLMError:
-            good, bad = [], []
+            good, invalid, bad, missing = _screen(answer.parsed, inp)
+            tally.final_reasons = _reasons(invalid, bad, missing, not good and not missing)
+        except client.LLMError as e:
+            if isinstance(e, client.LLMResponseError):
+                _note_bad_reply(tally, e)
+            good, bad, missing = [], [], required(inp)
+            tally.final_reasons = ["llm_unavailable" if isinstance(e, client.LLMUnavailable) else "llm_bad_reply"]
     tally.checked = sum(len(c.report.numbers) for c in good)
     if not good:                                                   # nothing usable from the model: top candidates, template text
         return template_advice(inp, tally)
     failed = {c.move.move_code for c in bad}
-    picked = [(c.move.move_code, c.move.title_text, c.move.why_text, "model") if c.move.move_code not in failed else
-              (c.move.move_code, *template_move(c.move.move_code, inp.candidates[c.move.move_code].facts), "template") for c in good]
-    for code in reversed(missing()):                               # still missing after the retry: the template, first
-        picked.insert(0, (code, *template_move(code, inp.candidates[code].facts), "template"))
-    picked = picked[:MAX_MOVES]
-    return _assemble(inp, picked, tally, ok=True)           # whatever is shown passed the checks, or is a template built from the facts
+    picked = [(c.move.move_code, c.move.why_text, "model") if c.move.move_code not in failed else
+              (c.move.move_code, template_move(c.move.move_code, inp.candidates[c.move.move_code].facts)[1], "template") for c in good]
+    for code in reversed(missing):                                 # no sentence for the pinned move after the retry: the template, first
+        picked.insert(0, (code, template_move(code, inp.candidates[code].facts)[1], "template"))
+    return _assemble(inp, picked[:MAX_MOVES], tally)

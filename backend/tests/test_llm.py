@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import time
 
 import httpx
@@ -24,17 +25,25 @@ class Args(BaseModel):
     horizon_months: int = Field(12, ge=1, le=60)
 
 
-def reply(content: str | None = "", tool_calls: list | None = None, reasoning: str = "") -> httpx.Response:
+def reply(content: str | None = "", tool_calls: list | None = None, reasoning: str = "", finish_reason: str = "stop") -> httpx.Response:
     msg: dict = {"role": "assistant", "content": content}
     if reasoning: msg["reasoning_content"] = reasoning
     if tool_calls: msg["tool_calls"] = tool_calls
     return httpx.Response(200, json={"id": "x", "object": "chat.completion", "created": 0, "model": "m",
-                                     "choices": [{"index": 0, "finish_reason": "stop", "message": msg}],
+                                     "choices": [{"index": 0, "finish_reason": finish_reason, "message": msg}],
                                      "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}})
 
 
 def call(name: str, arguments: str, id: str = "call_1") -> dict:
     return {"id": id, "type": "function", "function": {"name": name, "arguments": arguments}}
+
+
+@pytest.fixture(autouse=True)
+def _advisor_with_reasoning_on_lm_studio(monkeypatch):
+    """Most tests here use "advisor" as the reasoning-on, LM Studio agent. That is the documented option (see llm/config.py), not the default."""
+    monkeypatch.setenv("LLM_ADVISOR_BACKEND", "lmstudio")
+    monkeypatch.setenv("LLM_ADVISOR_MODEL", "nvidia/nemotron-3-nano-4b")
+    monkeypatch.setenv("LLM_ADVISOR_REASONING", "true")
 
 
 @pytest.fixture
@@ -120,7 +129,7 @@ def test_trace_has_no_prompt_or_reasoning(server):
     run(complete("advisor", [{"role": "user", "content": "SECRET-PROMPT"}]))
     entry = client.TRACE[-1]
     assert set(entry) == {"agent", "backend", "model", "latency_ms", "prompt_tokens", "completion_tokens", "ok",
-                         "tool_choice_downgraded", "temperature"}
+                         "tool_choice_downgraded", "temperature", "finish_reason", "max_tokens", "response_format"}
     assert entry["ok"] and entry["agent"] == "advisor" and entry["prompt_tokens"] == 10 and entry["completion_tokens"] == 5
     assert "SECRET" not in json.dumps(entry)
 
@@ -306,8 +315,19 @@ def test_hosted_and_minimizer_are_stubs(server, monkeypatch):
 
 
 def test_agent_config_defaults_and_env(monkeypatch):
+    for k in [k for k in os.environ if k.startswith("LLM_ADVISOR_")]:
+        monkeypatch.delenv(k)                                                  # the built-in defaults: the advisor is on llama-server, reasoning off
     on = {a: config.agent_config(a).reasoning for a in config.AGENTS}
-    assert on == {"orchestrator": False, "researcher": False, "presenter": False, "advisor": True}
+    assert on == {"orchestrator": False, "researcher": False, "presenter": False, "advisor": False}
+    adv = config.agent_config("advisor")
+    assert (adv.backend, adv.base_url, adv.model) == ("llamacpp", "http://localhost:1235/v1", "nemotron-nano-4b-nothink")
+    monkeypatch.setenv("LLM_ADVISOR_BACKEND", "lmstudio")                       # the documented reasoning-on option
+    monkeypatch.setenv("LLM_ADVISOR_MODEL", "nvidia/nemotron-3-nano-4b")
+    monkeypatch.setenv("LLM_ADVISOR_REASONING", "true")
+    adv = config.agent_config("advisor")
+    assert (adv.backend, adv.base_url, adv.model, adv.reasoning_flag) == ("lmstudio", "http://localhost:1234/v1", "nvidia/nemotron-3-nano-4b", "/think")
+    for k in [k for k in os.environ if k.startswith("LLM_ADVISOR_")]:
+        monkeypatch.delenv(k)
     monkeypatch.setenv("LLM_RESEARCHER_REASONING", "true")
     monkeypatch.setenv("LLM_RESEARCHER_MODEL", "other")
     monkeypatch.setenv("LLM_RESEARCHER_TIMEOUT", "5")
@@ -381,3 +401,15 @@ def test_llama_server_timings_are_captured(server):
     server.handler = lambda b: httpx.Response(200, json=body)
     out = run(complete("researcher", [{"role": "user", "content": "go"}]))
     assert out.timings == {"prompt_ms": 12.5, "predicted_ms": 30.0, "cache_n": 7}
+
+
+def test_an_unusable_reply_reports_how_it_ended_and_nothing_it_said(server):
+    """A reply cut off at max_tokens (finish_reason "length") is told apart from other bad replies, by numbers and a code only."""
+    server.handler = lambda body: reply('{"summary": "CANARY-TEXT and then it was cut o', finish_reason="length")
+    with pytest.raises(client.LLMResponseError) as e:
+        run(complete("advisor", [{"role": "user", "content": "go"}], json_schema=Summary, max_tokens=77))
+    assert e.value.max_tokens == 77 and [a["finish_reason"] for a in e.value.attempts] == ["length", "length"]
+    assert all(a["completion_tokens"] == 5 for a in e.value.attempts)
+    assert "CANARY" not in repr(e.value.attempts) + str(e.value)
+    entry = client.TRACE[-1]
+    assert entry["ok"] is False and entry["finish_reason"] == "length" and entry["max_tokens"] == 77

@@ -3,8 +3,16 @@
 For each agent in AGENTS, LLM_<AGENT>_{BACKEND,BASE_URL,MODEL,REASONING,TIMEOUT,TEMPERATURE,MAX_TOKENS} override the defaults below.
 LLM_BASE_URL (the fallback for an agent with no base URL of its own) and LLM_API_KEY point at OpenAI-compatible servers.
 
-Defaults: orchestrator, researcher and presenter run on a llama-server at :1235 (nemotron-nano-4b-nothink, reasoning disabled in
-the server); the advisor runs on LM Studio at :1234 (nvidia/nemotron-3-nano-4b).
+Defaults: every agent, the advisor included, runs on the llama-server at :1235 (nemotron-nano-4b-nothink, reasoning disabled in the
+server). The advisor was measured both ways (scripts/advisor_latency.py): reasoning-off answers in about 4 s (p90 6 s) with the same
+first-try pass rate as reasoning-on, which takes about 15 s (p90 25 s).
+
+Documented option: the advisor with reasoning on, on LM Studio. Put this in .env (no code change):
+    LLM_ADVISOR_BACKEND=lmstudio
+    LLM_ADVISOR_BASE_URL=http://localhost:1234/v1
+    LLM_ADVISOR_MODEL=nvidia/nemotron-3-nano-4b
+    LLM_ADVISOR_REASONING=true
+    LLM_ADVISOR_TIMEOUT=60            # and ADVISOR_BUDGET_S=30 (the default 12 s budget would serve the template most of the time)
 """
 from __future__ import annotations
 
@@ -22,8 +30,17 @@ DEFAULTS = {
     "orchestrator": ("llamacpp", LLAMACPP_URL, "nemotron-nano-4b-nothink", False, 0.0, 512),
     "researcher": ("llamacpp", LLAMACPP_URL, "nemotron-nano-4b-nothink", False, 0.2, 512),
     "presenter": ("llamacpp", LLAMACPP_URL, "nemotron-nano-4b-nothink", False, 0.0, 512),
-    "advisor": ("lmstudio", LMSTUDIO_URL, "nvidia/nemotron-3-nano-4b", True, 0.3, 1024),
+    "advisor": ("llamacpp", LLAMACPP_URL, "nemotron-nano-4b-nothink", False, 0.3, 1024),
 }
+
+
+ADVISOR_BUDGET_S = 12.0      # default; ADVISOR_BUDGET_S in the environment overrides it
+
+
+def advisor_budget_s() -> float:
+    """Seconds the advisor may take (model calls and retry together) before the template result is served instead."""
+    raw = os.environ.get("ADVISOR_BUDGET_S", "").strip()
+    return float(raw) if raw else ADVISOR_BUDGET_S
 
 
 @dataclass(frozen=True)

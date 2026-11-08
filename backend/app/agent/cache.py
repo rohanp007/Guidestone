@@ -4,11 +4,13 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import time
 from collections import OrderedDict
 from typing import Any, Awaitable, Callable
 
 MAX_ENTRIES = 500
 _CACHE: "OrderedDict[tuple, Any]" = OrderedDict()
+_EXPIRES: dict[tuple, float] = {}        # key -> time.monotonic() after which the entry is gone (only entries put with a ttl)
 _RUNS: dict[tuple[str, str], tuple[tuple, asyncio.Task]] = {}
 
 
@@ -22,14 +24,22 @@ def cache_key(customer_id: str, event: str, params: dict, prompt_version: str, d
 
 
 def get(key: tuple) -> Any | None:
+    if (exp := _EXPIRES.get(key)) is not None and time.monotonic() >= exp:
+        _CACHE.pop(key, None)
+        del _EXPIRES[key]
     hit = _CACHE.get(key)
     if hit is not None:
         _CACHE.move_to_end(key)
     return hit
 
 
-def put(key: tuple, value: Any) -> None:
+def put(key: tuple, value: Any, ttl: float | None = None) -> None:
+    """ttl: seconds until the entry expires (for results known to be temporary, such as a fallback); None keeps it until evicted."""
     _CACHE[key] = value
+    if ttl is None:
+        _EXPIRES.pop(key, None)
+    else:
+        _EXPIRES[key] = time.monotonic() + ttl
     _CACHE.move_to_end(key)
     while len(_CACHE) > MAX_ENTRIES:
         _CACHE.popitem(last=False)
@@ -37,6 +47,7 @@ def put(key: tuple, value: Any) -> None:
 
 def clear() -> None:
     _CACHE.clear()
+    _EXPIRES.clear()
     for _, task in list(_RUNS.values()):
         try:
             if not task.done():

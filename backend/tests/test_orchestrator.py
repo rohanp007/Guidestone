@@ -26,11 +26,12 @@ JOB = {"tool": "job_loss_stress", "args": {"horizon_months": 24}, "reason": "che
 
 
 def adopt_examples(messages) -> AdvisorAnswer:
-    """A well-behaved advisor: every candidate in the order given, each with its example sentence (placeholders and all)."""
+    """A well-behaved advisor: the example sentence for the pinned move, then the first two other moves with theirs."""
     view = messages[-1]["content"] if messages[-1]["role"] == "user" else messages[1]["content"]
-    codes = re.findall(r"move_code (\w+):", view)
-    examples = re.findall(r"example sentence: (.*)", view)
-    return AdvisorAnswer(moves=[AdvisorMove(move_code=c, title_text="A move", why_text=e) for c, e in zip(codes, examples)])
+    codes, sentences = re.findall(r"move_code (\w+):", view), re.findall(r"example sentence[^:]*: (.*)", view)
+    pinned = "The app's first move" in view
+    return AdvisorAnswer(pinned_why=sentences[0] if pinned else None,
+                         more=[AdvisorMove(move_code=c, why_text=e) for c, e in list(zip(codes, sentences))[1 if pinned else 0:][:2 if pinned else 3]])
 
 
 class FakeLLM:

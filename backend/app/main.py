@@ -1,6 +1,7 @@
 """Guidestone API. Deterministic endpoints only for now; the agent endpoints come later."""
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -10,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
 
 from . import auth, config
+from .agent import orchestrator
 from .api import agent as agent_api, formulas, me, meta, profiles
 from .api.serialize import SafeJSONResponse
 from .data import loader
@@ -31,7 +33,10 @@ async def lifespan(app: FastAPI):
     loader._tables()                     # transactions and statements, for the transactions endpoint
     profiles.paycheck_flags()
     llm_client.prewarm()
+    warm = asyncio.create_task(orchestrator.warm_featured(loader.load_profiles(), config.FEATURED_PERSONAS))    # in the background
     yield
+    warm.cancel()
+    await asyncio.gather(warm, return_exceptions=True)
     await llm_client.close_clients()
 
 

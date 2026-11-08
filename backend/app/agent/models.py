@@ -60,6 +60,24 @@ class AdviceMove(BaseModel):
     addresses_current_step: bool
 
 
+class BadReply(BaseModel):
+    """One model reply that was not usable JSON: how it ended, never what it said. finish_reason "length" means it was cut off."""
+    finish_reason: str
+    completion_tokens: int
+    max_tokens: int | None
+
+
+class AdviceDiagnostics(BaseModel):
+    """How the advisor's answer fared, as counts and reason codes only (never model text)."""
+    first_try_ok: bool                       # the model's first answer passed every check
+    retried: bool
+    model_calls: int
+    template_moves: int                      # moves served from the template
+    first_reasons: list[str] = Field(default_factory=list)     # why the first answer failed: unknown_move_code, figure_not_in_facts,
+    bad_replies: list[BadReply] = Field(default_factory=list)  # one per unusable reply (llm_bad_reply)
+    final_reasons: list[str] = Field(default_factory=list)     # judgment, style, contradicts_<label>, no_placeholder, zero_figure, ...
+
+
 class Advice(BaseModel):
     """What the customer is told to do next. The verdict and the candidates come from code; the model only picks and words them."""
     verdict: Literal["on_track", "plan_ahead", "act_now"]      # set by code (rules.verdict)
@@ -68,6 +86,7 @@ class Advice(BaseModel):
     notes: list[str] = Field(default_factory=list)             # e.g. "Retirement saving comes before education saving."
     source: Literal["model", "template", "mixed"]
     grounding: GroundingSummary
+    diagnostics: AdviceDiagnostics
 
 
 class AnalysisResult(BaseModel):

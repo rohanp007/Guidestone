@@ -4,7 +4,8 @@ complete(agent, messages, tools=None, json_schema=None, tool_choice="auto") -> L
   - prepends the agent's reasoning flag (/think or /no_think) to the system prompt, sends the agent's temperature
   - strips <think> blocks (and never reads reasoning_content), so reasoning is neither returned nor logged
   - parses tool-call arguments with json.loads and validates them against the tool's args model
-  - json_schema (a pydantic model): extracts and validates the JSON in the reply
+  - json_schema (a pydantic model): extracts and validates the JSON in the reply. response_schema (a JSON Schema dict) additionally asks
+    the server to constrain its output to it (response_format json_schema); a backend that rejects that gets the request again without it
   - a bad reply (non-JSON / invalid arguments / invalid JSON) is retried once, with a correction that names the fields at fault
   - timeout / connection error / 5xx / 429: one retry, then LLMUnavailable. 400 / 401 / 403 / 404 / 422: LLMRequestError at once
   - each call appends an entry (agent, backend, model, latency, tokens, ok; never prompt or reasoning text) to the current run's
@@ -36,6 +37,7 @@ _run_trace: contextvars.ContextVar[list[dict] | None] = contextvars.ContextVar("
 RETRY_BACKOFF_S = 0.5                                 # before the retry after a 429
 _transport: httpx.AsyncBaseTransport | None = None    # tests inject a mock server here
 _clients: dict[tuple, tuple[asyncio.AbstractEventLoop, openai.AsyncOpenAI]] = {}
+_no_json_schema: set[tuple] = set()                   # (backend, base_url) pairs that rejected response_format json_schema: not asked again
 
 
 class LLMError(Exception): ...
@@ -44,7 +46,10 @@ class LLMUnavailable(LLMError):
 class LLMRequestError(LLMError):
     """The server rejected the request (bad model id, context too long, malformed tools, auth): a bug to fix, never a fallback case."""
 class LLMResponseError(LLMError):
-    """The server answered, but not with usable JSON (after one retry)."""
+    """The server answered, but not with usable JSON (after one retry). `attempts` holds, per reply, the server's finish_reason
+    ("length" = cut off at max_tokens) and completion token count, and `max_tokens` the limit sent: numbers and a code, never text."""
+    attempts: tuple[dict, ...] = ()
+    max_tokens: int | None = None
 class ToolArgumentError(LLMResponseError):
     """The model called a tool with arguments that fail the tool's schema. `feedback` names the fields at fault."""
     def __init__(self, message: str, feedback: str = ""):
@@ -71,6 +76,7 @@ def set_transport(transport: httpx.AsyncBaseTransport | None) -> None:
     global _transport
     _transport = transport
     _clients.clear()
+    _no_json_schema.clear()
 
 
 async def close_clients() -> None:
@@ -193,6 +199,9 @@ class _Stats:
     prompt_tokens: int = 0
     completion_tokens: int = 0
     tool_choice_downgraded: bool = False
+    response_format: str | None = None               # "json_schema" (used) | "rejected" (the backend refused it; asked again without)
+    replies: list[dict] = field(default_factory=list)   # per reply: finish_reason, completion_tokens
+    max_tokens: int | None = None
     timings: dict = field(default_factory=dict)     # llama-server's own timing fields, summed over the attempts
 
 
@@ -221,10 +230,12 @@ def _prepare(cfg: config.AgentConfig, messages: list[dict], schema: type[BaseMod
 
 
 async def _request(cfg: config.AgentConfig, msgs: list[dict], tools: list[Tool] | None, tool_choice: str | dict, stats: _Stats,
-                   max_tokens: int | None = None, temperature: float | None = None) -> Any:
+                   max_tokens: int | None = None, temperature: float | None = None, response_format: dict | None = None) -> Any:
     """One chat completion. Timeout / connection error / 5xx / 429: retried once, then LLMUnavailable. Other 4xx: LLMRequestError."""
     kwargs: dict = {"model": cfg.model, "messages": msgs, "timeout": cfg.timeout, "temperature": cfg.temperature if temperature is None else temperature,
               "max_tokens": max_tokens or cfg.max_tokens}
+    if response_format:
+        kwargs["response_format"] = response_format
     if tools:
         if tool_choice == "required" and not cfg.supports_required_tool_choice:
             tool_choice, stats.tool_choice_downgraded = "auto", True   # would hang llama-server; callers rely on validation + fallback plans
@@ -248,6 +259,9 @@ async def _request(cfg: config.AgentConfig, msgs: list[dict], tools: list[Tool] 
         usage = getattr(resp, "usage", None)
         stats.prompt_tokens += getattr(usage, "prompt_tokens", 0) or 0
         stats.completion_tokens += getattr(usage, "completion_tokens", 0) or 0
+        stats.max_tokens = kwargs["max_tokens"]
+        stats.replies.append({"finish_reason": str(getattr(resp.choices[0], "finish_reason", None)),
+                              "completion_tokens": getattr(usage, "completion_tokens", 0) or 0})
         for k, v in ((getattr(resp, "model_extra", None) or {}).get("timings") or {}).items():
             if isinstance(v, (int, float)) and k in ("prompt_n", "prompt_ms", "predicted_n", "predicted_ms", "cache_n"):
                 stats.timings[k] = round(stats.timings.get(k, 0) + v, 1)
@@ -304,7 +318,7 @@ def _parse(resp: Any, tools: list[Tool] | None, schema: type[BaseModel] | None) 
 
 async def complete(agent: str, messages: list[dict], tools: list[Tool] | None = None, json_schema: type[BaseModel] | None = None,
                    tool_choice: str | dict = "auto", max_tokens: int | None = None,
-                   schema_in_prompt: bool = True, temperature: float | None = None) -> LLMResult:
+                   schema_in_prompt: bool = True, temperature: float | None = None, response_schema: dict | None = None) -> LLMResult:
     """tool_choice: "auto", "required" (must call a tool; downgraded to "auto" on llama-server, which the trace records) or "none".
     temperature overrides the agent's default for this call (used by retries, which at temperature 0 would repeat themselves).
     max_tokens overrides the agent's default for this call (e.g. 120 for a one-sentence summary).
@@ -313,14 +327,29 @@ async def complete(agent: str, messages: list[dict], tools: list[Tool] | None = 
     cfg = config.agent_config(agent)
     msgs = _prepare(cfg, messages, json_schema, bool(tools), schema_in_prompt)
     stats, ok = _Stats(), False
+    backend_key = (cfg.backend, cfg.base_url)
+    response_format = None
+    if response_schema is not None and backend_key not in _no_json_schema:
+        response_format = {"type": "json_schema", "json_schema": {"name": "answer", "strict": True, "schema": response_schema}}
+        stats.response_format = "json_schema"
     try:
         for attempt in (1, 2):
-            resp = await _request(cfg, msgs, tools, tool_choice, stats, max_tokens, temperature)
+            try:
+                resp = await _request(cfg, msgs, tools, tool_choice, stats, max_tokens, temperature, response_format)
+            except LLMRequestError:
+                if response_format is None:
+                    raise
+                # the backend does not take response_format json_schema: remember that, and ask again with the schema checked here
+                _no_json_schema.add(backend_key)
+                response_format, stats.response_format = None, "rejected"
+                resp = await _request(cfg, msgs, tools, tool_choice, stats, max_tokens, temperature, None)
             try:
                 content, calls, parsed = _parse(resp, tools, json_schema)
             except _BadReply as bad:
                 if attempt == 2:
-                    raise LLMResponseError(str(bad)) from None
+                    err = LLMResponseError(str(bad))
+                    err.attempts, err.max_tokens = tuple(stats.replies), stats.max_tokens
+                    raise err from None
                 msgs = msgs + bad.followup
                 continue
             ok = True
@@ -330,5 +359,7 @@ async def complete(agent: str, messages: list[dict], tools: list[Tool] | None = 
         entry = {"agent": agent, "backend": cfg.backend, "model": cfg.model, "latency_ms": round(stats.latency_ms, 1),
                  "prompt_tokens": stats.prompt_tokens, "completion_tokens": stats.completion_tokens, "ok": ok,
                  "tool_choice_downgraded": stats.tool_choice_downgraded,
+                 "finish_reason": stats.replies[-1]["finish_reason"] if stats.replies else None, "max_tokens": stats.max_tokens,
+                 "response_format": stats.response_format,
                  "temperature": cfg.temperature if temperature is None else temperature}
         record(entry)
