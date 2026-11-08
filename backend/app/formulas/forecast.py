@@ -17,7 +17,8 @@ import hashlib
 import json
 import os
 import pickle
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from collections.abc import Sequence
 from datetime import date, timedelta
 from functools import lru_cache
 from pathlib import Path
@@ -27,7 +28,7 @@ import pandas as pd
 
 from ..config import ASSUMPTIONS_PATH, DATA_DIR, assumptions as load_assumptions
 from ..data import derive, loader
-from ..data.models import (Assumption, Backtest, Base, ForecastChange, ForecastEvent, LiquidForecast, LowPoint, MonthEndPoint,
+from ..data.models import (Account, Assumption, Backtest, Base, ForecastChange, ForecastEvent, LiquidForecast, LowPoint, MonthEndPoint,
                            MonthEndProbability, MonthlyNet, PercentileBands, Profile, Recurring, Shortfall)
 from pydantic import Field
 
@@ -78,6 +79,27 @@ def next_bd(d: date) -> date:
 def _seed(*parts) -> int:
     """Stable across runs and machines (Python's hash() is not)."""
     return int.from_bytes(hashlib.sha256("|".join(map(str, parts)).encode()).digest()[:4], "big")
+
+
+@dataclass(frozen=True)
+class Flow:
+    """A dated, deterministic cash flow added to the schedule (signed: negative leaves the account). Passed in `changes` next to
+    ForecastChange. `replaces` names a debt account: its existing recurring payment (loan_payment / card_payment) is removed from
+    the schedule, so the flows that replace it are never counted on top of it. A card that is replaced stops being carried by the
+    card model: only its new purchases are paid, and the old balance is paid by the flows."""
+    day: date
+    amount: float
+    description: str = ""
+    kind: str = "scenario"
+    replaces: str | None = None
+
+
+def debt_account(profile: Profile, r: Recurring) -> Account | None:
+    """The liability a recurring loan / card payment services (same matching the schedule has always used for loans)."""
+    if r.kind == "card_payment":
+        return next((a for a in profile.accounts if a.type == "credit_card"), None)
+    t = _LOAN_TYPE.get(next((k for k in _LOAN_TYPE if k in r.description), ""), "")
+    return next((a for a in profile.accounts if a.type == t), None)
 
 
 # ------------------------------------------------------------------ 1. the deterministic schedule
@@ -133,7 +155,7 @@ def _occurrences(r: Recurring, as_of: date, end: date, is_income: bool) -> list[
     return [d for d in out if as_of < d <= end]
 
 
-def build_schedule(profile: Profile, horizon_months: int, A: dict[str, float], changes: list[ForecastChange] | None = None,
+def build_schedule(profile: Profile, horizon_months: int, A: dict[str, float], changes: Sequence[ForecastChange | Flow] | None = None,
                    simulate_card: bool = False) -> Schedule:
     as_of = profile.as_of_date
     end = month_end(add_months(as_of, horizon_months))
@@ -143,6 +165,7 @@ def build_schedule(profile: Profile, horizon_months: int, A: dict[str, float], c
     bump = A["rent_renewal_bump"]
     months_since = lambda d: (d.year - as_of.year) * 12 + d.month - as_of.month
 
+    replaced = {c.replaces for c in changes or [] if isinstance(c, Flow) and c.replaces}     # debts whose payments the flows take over
     income_monthly = rent_monthly = 0.0
     for r in profile.recurring:
         kind = _KIND.get(r.kind)
@@ -153,10 +176,12 @@ def build_schedule(profile: Profile, horizon_months: int, A: dict[str, float], c
         if kind == "card_payment" and simulate_card:
             sch.card_dates = dates                              # the payment depends on simulated card spending: see _simulate
             continue
+        if replaced and kind in ("debt_payment", "card_payment") and getattr(debt_account(profile, r), "id", None) in replaced:
+            continue                                            # replaced by Flow(s): drop the recurring payment, its events and its end
         per_event = r.monthly_amount / (2.0 if (r.cadence == "semimonthly" and is_income) else r.occurrences_per_month if r.cadence == "biweekly" else 1.0)
 
         if kind == "debt_payment":
-            acct = next((a for a in profile.accounts if a.type == _LOAN_TYPE.get(next((k for k in _LOAN_TYPE if k in r.description), ""), "")), None)
+            acct = debt_account(profile, r)
             if acct is not None and acct.term_months_remaining is not None:
                 left = max(1, acct.term_months_remaining)
                 if left < len(dates):
@@ -203,6 +228,10 @@ def build_schedule(profile: Profile, horizon_months: int, A: dict[str, float], c
             m = add_months(m, a.term_months)
 
     for c in changes or []:
+        if isinstance(c, Flow):
+            if as_of < c.day <= end:                            # flows are generated generically; those past the horizon are dropped
+                sch.cash.append([c.day, c.kind, c.amount, c.description or c.kind, None])
+            continue
         if c.type not in ("lump_sum", "income_change"):
             raise NotImplementedError(f"ForecastChange type {c.type!r} is not implemented yet")
         start = c.day or as_of + timedelta(days=1)
@@ -257,6 +286,7 @@ class Card:
     paydown: float             # share of the carried balance paid down each month
     share: float               # card purchases / all variable spend
     start_balance: float
+    account_id: str = ""
 
 
 def _card(profile: Profile) -> Card | None:
@@ -268,7 +298,7 @@ def _card(profile: Profile) -> Card | None:
     months = max(1, len(profile.history))
     avg = max(1.0, (acct.opening_balance + acct.balance) / 2)
     paydown = float(np.clip((acct.opening_balance - acct.balance) / (months * avg), *PAYDOWN_RANGE))
-    return Card(profile.spending.carries_card_balance, acct.rate, paydown, profile.spending.card_share, acct.balance)
+    return Card(profile.spending.carries_card_balance, acct.rate, paydown, profile.spending.card_share, acct.balance, acct.id)
 
 
 # ------------------------------------------------------------------ 2-3. variable spend + paths
@@ -286,7 +316,7 @@ class Sim:
 
 
 def _simulate(profile: Profile, horizon_months: int, paths: int, cushion: float, seed: int, A: dict[str, float],
-              changes: list[ForecastChange] | None, risk_factors: list[float] | None = None,
+              changes: Sequence[ForecastChange | Flow] | None, risk_factors: list[float] | None = None,
               income_scale: np.ndarray | None = None) -> Sim:
     """`risk_factors` are the calibration's month-end band factors. When given, the risk probabilities are computed on paths whose
     deviation from the median path is scaled by the factor interpolated for that day; the returned percentiles stay RAW (the
@@ -298,6 +328,8 @@ def _simulate(profile: Profile, horizon_months: int, paths: int, cushion: float,
         raise ValueError(f"{profile.id}: needs derive.enrich() first")
     sp = profile.spending
     card = _card(profile) if OPTIONS["total_spend"] and sp.monthly_total_samples else None
+    if card and any(isinstance(c, Flow) and c.replaces == card.account_id for c in changes or []):
+        card = replace(card, revolver=False, start_balance=0.0)      # Flows pay the old balance: the card model pays new purchases only
     sch = build_schedule(profile, horizon_months, A, changes, simulate_card=card is not None)
     D, M = sch.days, len(sch.month_ends)
     rng = np.random.default_rng(seed)

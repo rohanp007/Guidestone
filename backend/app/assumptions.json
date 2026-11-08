@@ -158,5 +158,20 @@
     "value": 12,
     "source": "Design choice (docs/rules.md section 1, step 4): a retiree whose retirement/investment accounts cover at least this many months of essentials has a drawdown backstop, so a thin cash cushion is not flagged. Withdrawals may be taxable; this is a planning simplification, not tax advice.",
     "as_of": "2026-11-08"
+  },
+  "card_min_pct": {
+    "value": 0.01,
+    "source": "Design choice for the payoff simulator: the common issuer minimum of 1% of the balance plus the month's interest (many issuers state it this way; some use 2% of balance, which would pay down faster). Not independently re-verified against a specific issuer.",
+    "as_of": "2026-11-08"
+  },
+  "card_min_floor": {
+    "value": 25,
+    "source": "Design choice for the payoff simulator: the usual dollar floor on a card's minimum payment ($25-$35 across large issuers). Not independently re-verified against a specific issuer.",
+    "as_of": "2026-11-08"
+  },
+  "payoff_max_months": {
+    "value": 360,
+    "source": "Design choice: payoff simulations stop after 30 years; a plan that has not cleared the debt by then is reported as not paying off (a minimum-only card can take longer).",
+    "as_of": "2026-11-08"
   }
 }
