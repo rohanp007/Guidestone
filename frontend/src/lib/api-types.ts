@@ -1990,6 +1990,21 @@ export interface components {
             strategies: components["schemas"]["StrategySummary"][];
             /** Cushion */
             cushion: number | null;
+            /**
+             * Excluded Mortgages
+             * @default []
+             */
+            excluded_mortgages?: string[];
+            /**
+             * Highest Debt Apr
+             * @default null
+             */
+            highest_debt_apr?: number | null;
+            /**
+             * Savings Rate
+             * @default null
+             */
+            savings_rate?: number | null;
         };
         /** AddLoan */
         AddLoan: {
@@ -2103,6 +2118,12 @@ export interface components {
              * @default null
              */
             order?: string[] | null;
+            /**
+             * Include Mortgage
+             * @description Count the mortgage as a debt to pay down (it is left out by default)
+             * @default false
+             */
+            include_mortgage?: boolean;
         };
         /** PayoffSimulationSummary */
         PayoffSimulationSummary: {
